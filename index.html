@@ -4,39 +4,112 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#0a2e1a">
-<title>AgriSpray Pro | Real-Time Farm Management</title>
+<title>AgriSpray Pro | Complete Farm Management System</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <!-- Firebase SDK -->
 <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getDatabase, ref, onValue, set, push, update, remove, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
-  
-  const firebaseConfig = {
-    apiKey: "AIzaSyDCXPRlN5CVmfZgpO7_NE2hRCqCr0h5mqY",
-    authDomain: "agrispray-pro.firebaseapp.com",
-    projectId: "agrispray-pro",
-    storageBucket: "agrispray-pro.firebasestorage.app",
-    messagingSenderId: "72689059265",
-    appId: "1:72689059265:web:53b6acbe2848cec099db40",
-    measurementId: "G-KTF3N6VSRP"
-  };
-  
-  const app = initializeApp(firebaseConfig);
-  const db = getDatabase(app);
-  
-  window.firebaseDB = db;
-  window.firebaseRef = ref;
-  window.firebaseOnValue = onValue;
-  window.firebaseSet = set;
-  window.firebasePush = push;
-  window.firebaseUpdate = update;
-  window.firebaseRemove = remove;
-  window.firebaseGet = get;
-  
-  console.log("Firebase Realtime DB initialized");
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getDatabase, ref, set, onValue, update, push, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDCXPRlN5CVmfZgpO7_NE2hRCqCr0h5mqY",
+  authDomain: "agrispray-pro.firebaseapp.com",
+  databaseURL: "https://agrispray-pro-default-rtdb.firebaseio.com",
+  projectId: "agrispray-pro",
+  storageBucket: "agrispray-pro.firebasestorage.app",
+  messagingSenderId: "72689059265",
+  appId: "1:72689059265:web:48bd60e10f5f11d199db40",
+  measurementId: "G-VPQLX34G7B"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getDatabase(firebaseApp);
+
+// Expose Firebase functions to global scope for use in non-module scripts
+window.firebaseDB = db;
+window.firebaseRef = ref;
+window.firebaseSet = set;
+window.firebaseUpdate = update;
+window.firebaseGet = get;
+window.firebaseOnValue = onValue;
+window.firebasePush = push;
+window.firebaseReady = true;
+
+// Start listening to Firebase after page loads
+window.addEventListener('firebaseInit', () => {
+  setupFirebaseListeners();
+});
+
+function setupFirebaseListeners() {
+  if (!window.firebaseDB) return;
+
+  // Listen to bookings in real-time
+  const bookingsRef = ref(db, 'bookings');
+  onValue(bookingsRef, (snapshot) => {
+    const data = snapshot.val();
+    if (data && window.appData) {
+      const fbBookings = Object.values(data);
+      // Merge: keep local + add any new from Firebase not in local
+      fbBookings.forEach(fb => {
+        const exists = window.appData.bookings.find(b => b.id === fb.id);
+        if (!exists) {
+          window.appData.bookings.push(fb);
+        } else {
+          // Update status if changed remotely
+          const idx = window.appData.bookings.findIndex(b => b.id === fb.id);
+          if (window.appData.bookings[idx].status !== fb.status) {
+            window.appData.bookings[idx].status = fb.status;
+            // Show notification for status changes
+            if (fb.status === 'completed' && window.currentUser) {
+              if (window.currentUser.role === 'manager' || window.currentUser.role === 'agri') {
+                window.addNotification(`✅ Booking ${fb.id} completed by pilot!`, 'success', null);
+                // Refresh current page if on bookings/dashboard
+                const pageTitle = document.getElementById('pageTitle')?.innerText || '';
+                if (pageTitle.includes('Booking') || pageTitle.includes('Dashboard')) {
+                  window.renderDashboard && window.renderDashboard();
+                }
+              }
+            }
+          }
+        }
+      });
+      localStorage.setItem('agrispray_data', JSON.stringify(window.appData));
+    }
+  });
+
+  // Listen to invoices in real-time
+  const invoicesRef = ref(db, 'invoices');
+  onValue(invoicesRef, (snapshot) => {
+    const data = snapshot.val();
+    if (data && window.appData) {
+      const fbInvoices = Object.values(data);
+      fbInvoices.forEach(fb => {
+        const exists = window.appData.invoices.find(i => i.id === fb.id);
+        if (!exists) {
+          window.appData.invoices.push(fb);
+          if (window.currentUser?.role === 'manager') {
+            window.addNotification(`📄 New invoice ${fb.id} from ${fb.pilotName || 'staff'}`, 'info', null);
+          }
+        } else {
+          const idx = window.appData.invoices.findIndex(i => i.id === fb.id);
+          window.appData.invoices[idx] = fb;
+        }
+      });
+      localStorage.setItem('agrispray_data', JSON.stringify(window.appData));
+    }
+  });
+
+  console.log('✅ Firebase real-time listeners active');
+  // Update status badge
+  const badge = document.getElementById('firebaseStatus');
+  if (badge) { badge.style.background = 'rgba(76,175,80,0.2)'; badge.style.color = '#4caf50'; badge.innerHTML = '🟢 Live Sync'; badge.title = 'Firebase connected - Real-time sync active'; }
+}
+
+// Called once main app is ready
+window.initFirebaseListeners = setupFirebaseListeners;
 </script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -58,8 +131,6 @@ body { font-family: 'Inter', sans-serif; background: radial-gradient(ellipse at 
 .password-eye { position: relative; }
 .password-eye input { padding-right: 45px; }
 .password-eye i { position: absolute; right: 15px; top: 50%; transform: translateY(-50%); cursor: pointer; }
-.demo-box { margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 12px; font-size: 11px; text-align: left; }
-.demo-box span { color: #ffb74d; }
 
 #mainApp { display: none; }
 .sidebar { position: fixed; top: 0; left: 0; width: 260px; height: 100vh; background: rgba(10,14,10,0.95); backdrop-filter: blur(12px); border-right: 1px solid rgba(255,255,255,0.08); z-index: 100; overflow-y: auto; }
@@ -80,6 +151,7 @@ body { font-family: 'Inter', sans-serif; background: radial-gradient(ellipse at 
 .page-title { font-size: 18px; font-weight: 700; }
 .top-bar-right { display: flex; align-items: center; gap: 20px; }
 .notification-bell { position: relative; cursor: pointer; font-size: 20px; color: var(--text-secondary); }
+.notification-bell:hover { color: var(--secondary); }
 .notification-bell .badge { position: absolute; top: -8px; right: -10px; background: var(--danger); color: white; border-radius: 50%; min-width: 18px; height: 18px; font-size: 10px; display: flex; align-items: center; justify-content: center; }
 .weather-widget { display: flex; align-items: center; gap: 15px; background: rgba(0,0,0,0.4); padding: 8px 20px; border-radius: 50px; }
 .weather-main { display: flex; align-items: center; gap: 12px; }
@@ -87,6 +159,8 @@ body { font-family: 'Inter', sans-serif; background: radial-gradient(ellipse at 
 .weather-temp { font-size: 28px; font-weight: 800; }
 .spray-advice { padding: 4px 12px; border-radius: 30px; font-size: 11px; font-weight: 600; }
 .spray-advice.good { background: rgba(76,175,80,0.2); color: #4caf50; }
+.spray-advice.warning { background: rgba(255,152,0,0.2); color: #ff9800; }
+.spray-advice.danger { background: rgba(239,68,68,0.2); color: #ef5350; }
 .user-info { display: flex; align-items: center; gap: 12px; }
 .role-badge { background: rgba(255,183,77,0.2); padding: 4px 12px; border-radius: 40px; font-size: 11px; }
 .logout-btn { background: rgba(255,255,255,0.1); border: none; padding: 6px 12px; border-radius: 40px; color: white; cursor: pointer; }
@@ -101,15 +175,17 @@ body { font-family: 'Inter', sans-serif; background: radial-gradient(ellipse at 
 @media (max-width: 900px) { .grid-3 { grid-template-columns: 1fr; } .grid-2 { grid-template-columns: 1fr; } }
 @media (max-width: 768px) { .sidebar { transform: translateX(-100%); width: 240px; } .main-content { margin-left: 0; } }
 
+.form-group { margin-bottom: 16px; }
+label { display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; }
 input, select, textarea { width: 100%; padding: 12px 14px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; color: white; font-size: 14px; }
 input:focus, select:focus { outline: none; border-color: var(--secondary); }
-label { display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; }
 
 .btn { padding: 10px 20px; border-radius: 40px; border: none; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; transition: all 0.2s; }
 .btn-primary { background: linear-gradient(135deg, var(--primary-light), var(--primary-dark)); color: white; }
 .btn-secondary { background: linear-gradient(135deg, var(--secondary), var(--secondary-dark)); color: #1a1a1a; }
 .btn-danger { background: var(--danger); color: white; }
 .btn-success { background: var(--success); color: white; }
+.btn-outline { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: white; }
 .btn-sm { padding: 6px 12px; font-size: 11px; }
 
 .table-responsive { overflow-x: auto; }
@@ -122,17 +198,20 @@ td { font-size: 13px; }
 .badge-pending { background: rgba(255,152,0,0.2); color: #ff9800; }
 .badge-approved { background: rgba(76,175,80,0.2); color: #4caf50; }
 .badge-completed { background: rgba(76,175,80,0.2); color: #4caf50; }
+.badge-active { background: rgba(76,175,80,0.2); color: #4caf50; }
 
-.kpi-card { background: rgba(0,0,0,0.4); backdrop-filter: blur(8px); border-radius: 20px; padding: 20px; text-align: center; border: 1px solid rgba(255,255,255,0.08); }
-.kpi-value { font-size: 32px; font-weight: 800; color: var(--secondary); }
 .finance-card { background: linear-gradient(135deg, rgba(26,122,62,0.15), rgba(0,0,0,0.3)); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; padding: 20px; margin-bottom: 20px; }
 .finance-card .amount { font-size: 28px; font-weight: 800; color: var(--secondary); }
 .progress-bar { background: rgba(255,255,255,0.1); border-radius: 20px; height: 6px; margin-top: 12px; overflow: hidden; }
 .progress-fill { background: linear-gradient(90deg, var(--secondary), var(--primary-light)); height: 100%; width: 0%; transition: width 0.5s; }
+.kpi-card { background: rgba(0,0,0,0.4); backdrop-filter: blur(8px); border-radius: 20px; padding: 20px; text-align: center; border: 1px solid rgba(255,255,255,0.08); }
+.kpi-value { font-size: 32px; font-weight: 800; color: var(--secondary); }
 
 .drone-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
 .drone-card { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 16px; text-align: center; position: relative; }
 .drone-card .drone-icon { font-size: 48px; margin-bottom: 10px; }
+.drone-card .drone-name { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+.drone-delete { position: absolute; top: 8px; right: 8px; background: rgba(239,68,68,0.8); border: none; color: white; width: 28px; height: 28px; border-radius: 50%; cursor: pointer; }
 
 .toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 1000; }
 .toast { background: rgba(13,26,13,0.95); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px 20px; margin-top: 8px; display: flex; align-items: center; gap: 10px; animation: slideIn 0.3s; }
@@ -140,11 +219,10 @@ td { font-size: 13px; }
 
 .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); z-index: 1000; align-items: center; justify-content: center; padding: 20px; }
 .modal-overlay.open { display: flex; }
-.modal-content { background: var(--darker); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 24px; max-width: 700px; width: 100%; max-height: 90vh; overflow-y: auto; }
+.modal-content { background: var(--darker); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 24px; max-width: 600px; width: 100%; max-height: 90vh; overflow-y: auto; }
 
 .receipt-thermal { background: white; color: #111; padding: 20px; border-radius: 16px; font-family: 'Courier New', monospace; font-size: 11px; max-width: 300px; margin: 0 auto; }
 .watermark { position: fixed; bottom: 10px; right: 270px; font-size: 9px; color: rgba(255,255,255,0.1); }
-.status-badge { display: inline-block; background: #4caf50; color: white; padding: 2px 8px; border-radius: 20px; font-size: 10px; margin-left: 10px; }
 </style>
 </head>
 <body>
@@ -153,27 +231,20 @@ td { font-size: 13px; }
   <div class="login-card">
     <div class="logo-icon">🚁🌾</div>
     <h1>AgriSpray Pro</h1>
-    <div>Real-Time Enterprise System</div>
-    <input type="email" id="loginEmail" placeholder="Email Address" value="manager@agrispray.com">
+    <div class="subtitle">Enterprise Farm Management System</div>
+    <input type="email" id="loginEmail" placeholder="Email Address">
     <div class="password-eye">
-      <input type="password" id="loginPassword" placeholder="Password" value="Admin@123">
+      <input type="password" id="loginPassword" placeholder="Password">
       <i class="fas fa-eye" onclick="togglePassword()"></i>
     </div>
     <button onclick="attemptLogin()">Access Dashboard</button>
-    <div class="demo-box">
-      <strong>🔐 Demo Credentials:</strong><br>
-      📧 manager@agrispray.com | 🔑 Admin@123<br>
-      📧 pilot@agrispray.com | 🔑 Pilot@123<br>
-      📧 agri@agrispray.com | 🔑 Agri@123
-    </div>
     <div id="loginError" style="color: var(--danger); font-size: 12px; margin-top: 12px; display: none;"></div>
-    <div id="loginLoading" style="color: var(--secondary); font-size: 12px; margin-top: 12px; display: none;">⏳ Connecting to Firebase...</div>
   </div>
 </div>
 
 <div id="mainApp">
   <div class="sidebar">
-    <div class="logo"><div class="icon">🚁</div><h2>AgriSpray Pro</h2><p>Real-Time</p></div>
+    <div class="logo"><div class="icon">🚁</div><h2>AgriSpray Pro</h2><p>Enterprise Edition</p></div>
     <nav id="sidebarNav"></nav>
     <div class="sidebar-footer"><div id="sidebarTime"></div></div>
   </div>
@@ -181,9 +252,16 @@ td { font-size: 13px; }
     <div class="top-bar">
       <h2 class="page-title" id="pageTitle">📊 Dashboard</h2>
       <div class="top-bar-right">
-        <div class="weather-widget"><div class="weather-main"><div class="weather-icon">☀️</div><div><div class="weather-temp"><span id="weatherTemp">--</span>°C</div></div></div><div class="spray-advice good">Ready</div></div>
-        <div class="notification-bell" onclick="showNotifications()"><i class="fas fa-bell"></i><span class="badge" id="notificationBadge" style="display: none;">0</span></div>
-        <div class="user-info"><span class="role-badge" id="userRoleBadge"></span><span class="user-name" id="userNameDisplay"></span><button class="logout-btn" onclick="logout()"><i class="fas fa-sign-out-alt"></i></button></div>
+        <div class="weather-widget" id="weatherWidget">
+          <div class="weather-main"><div class="weather-icon" id="weatherIcon">☀️</div><div><div class="weather-temp"><span id="weatherTemp">--</span>°C</div></div></div>
+          <div class="spray-advice good" id="sprayAdvice">Checking...</div>
+        </div>
+        <div class="notification-bell" onclick="showNotifications()">
+          <i class="fas fa-bell"></i>
+          <span class="badge" id="notificationBadge" style="display: none;">0</span>
+        </div>
+        <div id="firebaseStatus" title="Firebase Sync Status" style="font-size:12px; padding:4px 10px; border-radius:20px; background:rgba(255,152,0,0.2); color:#ff9800;">🔄 Connecting...</div>
+        <div class="user-info"><span class="role-badge" id="userRoleBadge">Manager</span><span class="user-name" id="userNameDisplay">Adnan</span><button class="logout-btn" onclick="logout()"><i class="fas fa-sign-out-alt"></i></button></div>
       </div>
     </div>
     <div class="content-area" id="contentArea"></div>
@@ -191,121 +269,254 @@ td { font-size: 13px; }
 </div>
 
 <div class="toast-container" id="toastContainer"></div>
-<div class="watermark">Made by Adnan Ali Ahmad Baloch | AgriSpray Pro Real-Time © 2026</div>
+<div class="watermark">Made by Adnan Ali Ahmad Baloch | AgriSpray Pro © 2026</div>
 
+<div id="viewPasswordModal" class="modal-overlay"><div class="modal-content"><div class="modal-header"><h3>User Credentials</h3><button class="modal-close" onclick="closeModal('viewPasswordModal')">✕</button></div><div id="passwordContent"></div></div></div>
 <div id="printModal" class="modal-overlay"><div class="modal-content"><div class="modal-header"><h3>Print Invoice</h3><button class="modal-close" onclick="closeModal('printModal')">✕</button></div><div id="printContent"></div><div style="display: flex; gap: 10px; margin-top: 20px;"><button class="btn btn-primary" onclick="printInvoicePDF()">Save PDF</button><button class="btn btn-secondary" onclick="printThermalReceipt()">Thermal Print</button></div></div></div>
-<div id="approvalModal" class="modal-overlay"><div class="modal-content"><div class="modal-header"><h3>Approve Invoice</h3><button class="modal-close" onclick="closeModal('approvalModal')">✕</button></div><div id="approvalContent"></div></div></div>
-<div id="notificationsModal" class="modal-overlay"><div class="modal-content"><div class="modal-header"><h3>Real-Time Notifications</h3><button class="modal-close" onclick="closeModal('notificationsModal')">✕</button></div><div id="notificationsList" style="max-height:400px; overflow-y:auto;"></div></div></div>
 <div id="changePasswordModal" class="modal-overlay"><div class="modal-content"><div class="modal-header"><h3>Change Password</h3><button class="modal-close" onclick="closeModal('changePasswordModal')">✕</button></div><div id="changePwdContent"></div></div></div>
+<div id="notificationsModal" class="modal-overlay"><div class="modal-content"><div class="modal-header"><h3>Notifications</h3><button class="modal-close" onclick="closeModal('notificationsModal')">✕</button></div><div id="notificationsList" style="max-height:400px; overflow-y:auto;"></div></div></div>
+<div id="approvalModal" class="modal-overlay"><div class="modal-content"><div class="modal-header"><h3>Approve Invoice</h3><button class="modal-close" onclick="closeModal('approvalModal')">✕</button></div><div id="approvalContent"></div></div></div>
 
 <script>
-// Firebase Realtime Database
-let db, currentUser = null, currentInvoiceForPrint = null;
-let realtimeBookings = [], realtimeInvoices = [], realtimeExpenses = [], realtimeInvestments = [], realtimeDrones = [], realtimeUsers = [], realtimeEmployeeExpenses = [];
-let firebaseReady = false;
-
-function toast(msg, type='success') { let c = document.getElementById('toastContainer'), d = document.createElement('div'); d.className = 'toast'; d.innerHTML = `<i class="fas ${type==='success'?'fa-check-circle':'fa-exclamation-circle'}"></i> ${msg}`; c.appendChild(d); setTimeout(() => d.remove(), 3000); }
-function formatCurrency(a) { return '₨ ' + (a || 0).toLocaleString(); }
-function today() { return new Date().toISOString().slice(0,10); }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
-function togglePassword() { let i=document.getElementById('loginPassword'), e=event.target; if(i.type==="password"){ i.type="text"; e.classList.replace('fa-eye','fa-eye-slash'); }else{ i.type="password"; e.classList.replace('fa-eye-slash','fa-eye'); } }
-
-// Default Users
+// ==================== DEFAULT DATA ====================
 const DEFAULT_USERS = [
   { id: "u1", email: "manager@agrispray.com", password: "Admin@123", role: "manager", name: "Adnan Ali", active: true, joinDate: "2024-01-01", salary: 150000, status: "active" },
   { id: "u2", email: "pilot@agrispray.com", password: "Pilot@123", role: "pilot", name: "Ahmed Khan", active: true, joinDate: "2024-02-15", salary: 50000, status: "active" },
   { id: "u3", email: "agri@agrispray.com", password: "Agri@123", role: "agri", name: "Aslam Khan", active: true, joinDate: "2024-03-01", salary: 40000, status: "active" }
 ];
 
-async function initFirebase() {
-  if(!window.firebaseDB) { console.log("Waiting for Firebase..."); setTimeout(initFirebase, 500); return; }
-  db = window.firebaseDB;
-  
-  try {
-    // Check and seed users
-    const usersSnapshot = await window.firebaseGet(window.firebaseRef(db, 'users'));
-    if (!usersSnapshot.exists()) {
-      for(let u of DEFAULT_USERS) await window.firebaseSet(window.firebaseRef(db, `users/${u.id}`), u);
-      await window.firebaseSet(window.firebaseRef(db, 'drones/d1'), { id:"d1", name:"DJI Agras T40", status:"active" });
-      await window.firebaseSet(window.firebaseRef(db, 'drones/d2'), { id:"d2", name:"DJI Agras T20", status:"active" });
-      await window.firebaseSet(window.firebaseRef(db, 'settings'), { companyName: "AgriSpray Pro", totalDroneInvestment: 2000000, droneRecovered: 0 });
-      console.log("Firebase seeded with default data");
-    }
-    
-    // Setup listeners
-    window.firebaseOnValue(window.firebaseRef(db, 'bookings'), (snap) => { realtimeBookings = snap.val() ? Object.values(snap.val()) : []; if(currentUser) refreshCurrentPage(); updateBadges(); });
-    window.firebaseOnValue(window.firebaseRef(db, 'invoices'), (snap) => { realtimeInvoices = snap.val() ? Object.values(snap.val()) : []; refreshCurrentPage(); updateBadges(); });
-    window.firebaseOnValue(window.firebaseRef(db, 'expenses'), (snap) => { realtimeExpenses = snap.val() ? Object.values(snap.val()) : []; refreshCurrentPage(); });
-    window.firebaseOnValue(window.firebaseRef(db, 'employeeExpenses'), (snap) => { realtimeEmployeeExpenses = snap.val() ? Object.values(snap.val()) : []; refreshCurrentPage(); });
-    window.firebaseOnValue(window.firebaseRef(db, 'investments'), (snap) => { realtimeInvestments = snap.val() ? Object.values(snap.val()) : []; refreshCurrentPage(); });
-    window.firebaseOnValue(window.firebaseRef(db, 'drones'), (snap) => { realtimeDrones = snap.val() ? Object.values(snap.val()) : []; refreshCurrentPage(); });
-    window.firebaseOnValue(window.firebaseRef(db, 'users'), (snap) => { realtimeUsers = snap.val() ? Object.values(snap.val()) : []; refreshCurrentPage(); });
-    
-    firebaseReady = true;
-    document.getElementById('loginLoading').style.display = 'none';
-    console.log("Firebase ready, users loaded:", realtimeUsers.length);
-  } catch(e) { console.error("Firebase init error:", e); toast("Firebase connection issue. Check security rules.", "error"); }
+const PRODUCTS = []; // Products entered manually as free text
+
+window.appData = {};
+let appData = window.appData;
+Object.assign(appData, {
+  users: [],
+  drones: [
+    { id: "d1", name: "DJI Agras T40", status: "active", totalFlights: 0, totalHours: 0 },
+    { id: "d2", name: "DJI Agras T20", status: "active", totalFlights: 0, totalHours: 0 }
+  ],
+  bookings: [],
+  invoices: [],
+  expenses: [],
+  investments: [],
+  notifications: [],
+  nextBookingNo: 1,
+  nextInvoiceNo: 1,
+  totalDroneInvestment: 2000000,
+  droneRecovered: 0,
+  companyName: "AgriSpray Pro",
+  whatsappNumber: ""
+});
+appData = window.appData;
+
+let currentUser = null;
+window.currentUser = null;
+let currentInvoiceForPrint = null;
+
+function togglePassword() { let i = document.getElementById('loginPassword'), e = event.target; if (i.type === "password") { i.type = "text"; e.classList.replace('fa-eye', 'fa-eye-slash'); } else { i.type = "password"; e.classList.replace('fa-eye-slash', 'fa-eye'); } }
+function toast(msg, t = 'success') { let c = document.getElementById('toastContainer'), d = document.createElement('div'); d.className = 'toast'; d.innerHTML = `<i class="fas ${t === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'}"></i> ${msg}`; c.appendChild(d); setTimeout(() => d.remove(), 3000); }
+function formatCurrency(a) { return '₨ ' + (a || 0).toLocaleString(); }
+function today() { return new Date().toISOString().slice(0, 10); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+function saveData() {
+  localStorage.setItem('agrispray_data', JSON.stringify(appData));
+  window.appData = appData;
+  // Sync to Firebase if ready
+  syncToFirebase();
 }
 
-async function syncToFirebase(path, data) { if(window.firebaseSet && db) await window.firebaseSet(window.firebaseRef(db, path), data); }
-async function deleteFromFirebase(path) { if(window.firebaseRemove && db) await window.firebaseRemove(window.firebaseRef(db, path)); }
+function syncToFirebase() {
+  if (!window.firebaseReady || !window.firebaseDB) return;
+  try {
+    const bookingsObj = {};
+    appData.bookings.forEach(b => { bookingsObj[b.id] = b; });
+    window.firebaseSet(window.firebaseRef(window.firebaseDB, 'bookings'), bookingsObj).catch(e => console.warn('FB bookings:', e));
 
-function getBookingNumber() { return `BK-${Date.now().toString().slice(-6)}`; }
-function getInvoiceNumber() { return `INV-${Date.now().toString().slice(-6)}`; }
+    const invoicesObj = {};
+    appData.invoices.forEach(i => { invoicesObj[i.id] = i; });
+    window.firebaseSet(window.firebaseRef(window.firebaseDB, 'invoices'), invoicesObj).catch(e => console.warn('FB invoices:', e));
 
-function updateBadges() {
-  if(document.getElementById('bookingBadge')) document.getElementById('bookingBadge').innerText = realtimeBookings.filter(b=>b.status==='pending').length;
-  if(document.getElementById('invoiceBadge')) document.getElementById('invoiceBadge').innerText = realtimeInvoices.filter(i=>i.status==='pending').length;
+    // Sync users (without passwords in a real app — here kept for simplicity since rules are open)
+    const usersObj = {};
+    appData.users.forEach(u => { usersObj[u.id] = u; });
+    window.firebaseSet(window.firebaseRef(window.firebaseDB, 'users'), usersObj).catch(e => console.warn('FB users:', e));
+
+    // Sync investments
+    const invObj = {};
+    appData.investments.forEach(i => { invObj[i.id] = i; });
+    window.firebaseSet(window.firebaseRef(window.firebaseDB, 'investments'), invObj).catch(e => console.warn('FB investments:', e));
+  } catch (e) { console.warn('Firebase sync error:', e); }
+}
+function loadData() {
+  let saved = localStorage.getItem('agrispray_data');
+  if (saved) {
+    try {
+      let parsed = JSON.parse(saved);
+      Object.assign(appData, parsed);
+      window.appData = appData;
+    } catch (e) { }
+  }
+  for (let du of DEFAULT_USERS) {
+    if (!appData.users.find(u => u.id === du.id)) {
+      appData.users.push(du);
+    }
+  }
+  if (!appData.nextBookingNo) appData.nextBookingNo = 1;
+  if (!appData.nextInvoiceNo) appData.nextInvoiceNo = 1;
+  if (!appData.notifications) appData.notifications = [];
+  if (!appData.expenses) appData.expenses = [];
+  saveData();
+  // Init Firebase listeners once data is loaded
+  setTimeout(() => { if (window.initFirebaseListeners) window.initFirebaseListeners(); }, 1000);
 }
 
 function addNotification(message, type, targetRole) {
   let notif = { id: Date.now(), message, type, targetRole, timestamp: new Date().toLocaleTimeString(), read: false };
-  if(window.firebasePush && db) window.firebasePush(window.firebaseRef(db, 'notifications'), notif);
-  toast(message, type);
+  appData.notifications.unshift(notif);
+  saveData();
+  updateNotificationBadge();
+  if (!targetRole || targetRole === currentUser?.role) toast(message, type);
 }
+window.addNotification = addNotification;
 
-// Authentication
-async function attemptLogin() {
-  if(!firebaseReady) { document.getElementById('loginLoading').style.display = 'block'; toast("Connecting to Firebase...", "warning"); setTimeout(() => { document.getElementById('loginLoading').style.display = 'none'; }, 2000); return; }
-  
-  let email = document.getElementById('loginEmail').value;
-  let pwd = document.getElementById('loginPassword').value;
-  let user = realtimeUsers.find(u => u.email === email && u.password === pwd && u.active);
-  
-  if(user){
-    currentUser = user;
-    localStorage.setItem('agrispray_session', JSON.stringify({ id: user.id, role: user.role, name: user.name }));
-    document.getElementById('loginScreen').style.display = 'none';
-    document.getElementById('mainApp').style.display = 'block';
-    document.getElementById('userRoleBadge').innerHTML = user.role === 'manager' ? '👑 Manager' : (user.role === 'pilot' ? '✈️ Pilot' : '🌾 Agri Officer');
-    document.getElementById('userNameDisplay').innerHTML = user.name.split(' ')[0];
-    buildSidebar();
-    showPage('dashboard');
-    toast(`Welcome ${user.name}! Real-time sync active`);
-  } else {
-    document.getElementById('loginError').style.display='block';
-    document.getElementById('loginError').innerHTML='Invalid credentials! Use: manager@agrispray.com / Admin@123';
-    setTimeout(()=>document.getElementById('loginError').style.display='none',4000);
+function updateNotificationBadge() {
+  let unreadCount = appData.notifications.filter(n => !n.read).length;
+  let badge = document.getElementById('notificationBadge');
+  if (badge) {
+    if (unreadCount > 0) { badge.style.display = 'flex'; badge.innerText = unreadCount > 9 ? '9+' : unreadCount; }
+    else badge.style.display = 'none';
   }
 }
 
-function logout() { localStorage.removeItem('agrispray_session'); currentUser = null; document.getElementById('loginScreen').style.display='flex'; document.getElementById('mainApp').style.display='none'; }
+function showNotifications() {
+  let html = appData.notifications.length === 0 ? '<div style="text-align:center;padding:20px;">No notifications</div>' : 
+    appData.notifications.map(n => `<div style="padding:12px; border-bottom:1px solid rgba(255,255,255,0.1); ${!n.read ? 'background:rgba(255,183,77,0.1); border-left:3px solid #ffb74d;' : ''}" onclick="markNotificationRead(${n.id})"><i class="fas ${n.type === 'success' ? 'fa-check-circle' : (n.type === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle')}" style="color:${n.type === 'success' ? '#4caf50' : (n.type === 'error' ? '#ef5350' : '#ff9800')}; margin-right:10px;"></i> ${n.message}<div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:4px;">${n.timestamp}</div></div>`).join('');
+  document.getElementById('notificationsList').innerHTML = html;
+  document.getElementById('notificationsModal').classList.add('open');
+}
+
+function markNotificationRead(id) {
+  let notif = appData.notifications.find(n => n.id === id);
+  if (notif) { notif.read = true; saveData(); updateNotificationBadge(); showNotifications(); }
+}
+
+function getBookingNumber() { let num = appData.nextBookingNo; appData.nextBookingNo++; saveData(); return `BK-${String(num).padStart(4, '0')}`; }
+function getInvoiceNumber() { let num = appData.nextInvoiceNo; appData.nextInvoiceNo++; saveData(); return `INV-${String(num).padStart(4, '0')}`; }
+
+// ==================== WEATHER ====================
+async function fetchWeather() {
+  try {
+    let r = await fetch('https://api.open-meteo.com/v1/forecast?latitude=34.1985&longitude=72.0243&current=temperature_2m,wind_speed_10m,precipitation');
+    let d = await r.json();
+    let temp = Math.round(d.current.temperature_2m);
+    let wind = Math.round(d.current.wind_speed_10m);
+    let rain = d.current.precipitation || 0;
+    document.getElementById('weatherTemp').innerHTML = temp;
+    let advice = "", adviceClass = "good";
+    if (wind > 20 || rain > 5) { advice = "⚠️ Not Safe for Spray"; adviceClass = "danger"; }
+    else if (wind > 15) { advice = "⚠️ Caution Advised"; adviceClass = "warning"; }
+    else { advice = "✅ Ideal Spray Time"; adviceClass = "good"; }
+    document.getElementById('sprayAdvice').innerHTML = advice;
+    document.getElementById('sprayAdvice').className = `spray-advice ${adviceClass}`;
+    let icon = rain > 0 ? "🌧️" : (wind > 15 ? "💨" : (temp > 35 ? "🔥" : "☀️"));
+    document.getElementById('weatherIcon').innerHTML = icon;
+  } catch (e) { }
+}
+fetchWeather(); setInterval(fetchWeather, 300000);
+
+function updateDateTime() { let now = new Date(); let td = document.getElementById('sidebarTime'); if (td) td.innerHTML = now.toLocaleDateString() + '<br>' + now.toLocaleTimeString(); }
+setInterval(updateDateTime, 1000); updateDateTime();
+
+// ==================== AUTHENTICATION ====================
+function attemptLogin() {
+  let e = document.getElementById('loginEmail').value.trim().toLowerCase();
+  let p = document.getElementById('loginPassword').value;
+  const btn = document.querySelector('.login-card button');
+  if (btn) { btn.disabled = true; btn.textContent = 'Signing in...'; }
+
+  function doLogin() {
+    let u = appData.users.find(u => u.email.toLowerCase() === e && u.password === p);
+    if (btn) { btn.disabled = false; btn.textContent = 'Access Dashboard'; }
+    if (u && !u.active) {
+      showLoginError('Your account is inactive. Contact your manager.');
+      return;
+    }
+    if (u && u.status === 'inactive') {
+      showLoginError('Your account has been deactivated. Contact your manager.');
+      return;
+    }
+    if (u) {
+      currentUser = u;
+      window.currentUser = u;
+      localStorage.setItem('agrispray_session', JSON.stringify({ id: u.id, role: u.role, name: u.name }));
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('mainApp').style.display = 'block';
+      document.getElementById('userRoleBadge').innerHTML = u.role === 'manager' ? '👑 Manager' : (u.role === 'pilot' ? '✈️ Pilot' : '🌾 Agri Officer');
+      document.getElementById('userNameDisplay').innerHTML = u.name.split(' ')[0];
+      buildSidebar();
+      showPage('dashboard');
+      updateNotificationBadge();
+      toast(`Welcome back, ${u.name}!`);
+    } else {
+      showLoginError('Invalid email or password. Please try again.');
+    }
+  }
+
+  // Pull latest users from Firebase first so new accounts show up immediately
+  if (window.firebaseReady && window.firebaseDB) {
+    window.firebaseGet(window.firebaseRef(window.firebaseDB, 'users')).then(snapshot => {
+      const fbUsers = snapshot.val();
+      if (fbUsers) {
+        Object.values(fbUsers).forEach(fu => {
+          const idx = appData.users.findIndex(u => u.id === fu.id);
+          if (idx === -1) appData.users.push(fu);
+          else appData.users[idx] = fu; // always use Firebase version
+        });
+        localStorage.setItem('agrispray_data', JSON.stringify(appData));
+      }
+      doLogin();
+    }).catch(() => doLogin()); // if Firebase fails, try local
+  } else {
+    doLogin();
+  }
+}
+
+function showLoginError(msg) {
+  let el = document.getElementById('loginError');
+  el.style.display = 'block';
+  el.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${msg}`;
+  setTimeout(() => el.style.display = 'none', 4000);
+}
+
+function logout() { localStorage.removeItem('agrispray_session'); currentUser = null; document.getElementById('loginScreen').style.display = 'flex'; document.getElementById('mainApp').style.display = 'none'; }
 
 function checkSession() {
   let s = localStorage.getItem('agrispray_session');
-  if(s && firebaseReady && realtimeUsers.length){ 
-    let ses = JSON.parse(s); 
-    let u = realtimeUsers.find(u => u.id === ses.id && u.active); 
-    if(u){ currentUser = u; document.getElementById('loginScreen').style.display='none'; document.getElementById('mainApp').style.display='block'; 
-      document.getElementById('userRoleBadge').innerHTML = u.role==='manager'?'👑 Manager':(u.role==='pilot'?'✈️ Pilot':'🌾 Agri Officer');
-      document.getElementById('userNameDisplay').innerHTML = u.name.split(' ')[0]; buildSidebar(); showPage('dashboard'); return true; 
-    }
-  } return false;
+  if (s) {
+    try {
+      let ses = JSON.parse(s);
+      let u = appData.users.find(u => u.id === ses.id && u.active);
+      if (u) {
+        currentUser = u;
+        window.currentUser = u;
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('mainApp').style.display = 'block';
+        document.getElementById('userRoleBadge').innerHTML = u.role === 'manager' ? '👑 Manager' : (u.role === 'pilot' ? '✈️ Pilot' : '🌾 Agri Officer');
+        document.getElementById('userNameDisplay').innerHTML = u.name.split(' ')[0];
+        buildSidebar();
+        showPage('dashboard');
+        updateNotificationBadge();
+        return true;
+      }
+    } catch (e) { }
+  }
+  return false;
 }
 
 function buildSidebar() {
   let navHtml = '<div class="nav-section">MAIN</div><div class="nav-item" onclick="showPage(\'dashboard\')"><i class="fas fa-chart-line"></i> Dashboard</div>';
-  if(currentUser.role === 'manager'){
+  if (currentUser.role === 'manager') {
     navHtml += '<div class="nav-item" onclick="showPage(\'bookings\')"><i class="fas fa-calendar-check"></i> Bookings <span class="nav-badge" id="bookingBadge">0</span></div>';
     navHtml += '<div class="nav-item" onclick="showPage(\'invoices\')"><i class="fas fa-receipt"></i> Invoices <span class="nav-badge" id="invoiceBadge">0</span></div>';
     navHtml += '<div class="nav-section">FINANCE</div><div class="nav-item" onclick="showPage(\'expenses\')"><i class="fas fa-coins"></i> Expenses</div>';
@@ -313,82 +524,565 @@ function buildSidebar() {
     navHtml += '<div class="nav-section">ASSETS</div><div class="nav-item" onclick="showPage(\'drones\')"><i class="fas fa-helicopter"></i> Drones</div>';
     navHtml += '<div class="nav-section">TEAM</div><div class="nav-item" onclick="showPage(\'employees\')"><i class="fas fa-users"></i> Employees</div>';
     navHtml += '<div class="nav-section">SYSTEM</div><div class="nav-item" onclick="showPage(\'settings\')"><i class="fas fa-cog"></i> Settings</div>';
-  } else if(currentUser.role === 'pilot') {
+  } else if (currentUser.role === 'pilot') {
     navHtml += '<div class="nav-item" onclick="showPage(\'bookings\')"><i class="fas fa-calendar-check"></i> My Bookings</div>';
     navHtml += '<div class="nav-item" onclick="showPage(\'invoices\')"><i class="fas fa-receipt"></i> My Invoices</div>';
     navHtml += '<div class="nav-section">SYSTEM</div><div class="nav-item" onclick="showPage(\'settings\')"><i class="fas fa-cog"></i> Settings</div>';
-  } else if(currentUser.role === 'agri') {
+  } else if (currentUser.role === 'agri') {
     navHtml += '<div class="nav-item" onclick="showPage(\'bookings\')"><i class="fas fa-calendar-check"></i> My Bookings</div>';
+    navHtml += '<div class="nav-item" onclick="showPage(\'invoices\')"><i class="fas fa-receipt"></i> Create Invoice</div>';
     navHtml += '<div class="nav-section">SYSTEM</div><div class="nav-item" onclick="showPage(\'settings\')"><i class="fas fa-cog"></i> Settings</div>';
   }
   navHtml += '<div class="nav-item" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Logout</div>';
   document.getElementById('sidebarNav').innerHTML = navHtml;
-  updateBadges();
 }
 
-function refreshCurrentPage() {
-  let activePage = document.querySelector('.nav-item.active')?.getAttribute('onclick')?.match(/'(\w+)'/)?.[1];
-  if(activePage) showPage(activePage); else if(currentUser) showPage('dashboard');
-}
-
-// Dashboard
+// ==================== DASHBOARD ====================
 function renderDashboard() {
-  let totalRevenue = realtimeInvoices.filter(i => i.status === 'approved').reduce((s, i) => s + i.total, 0);
-  let totalExpenses = [...realtimeExpenses, ...realtimeEmployeeExpenses].reduce((s, e) => s + e.amount, 0);
+  window.renderDashboard = renderDashboard;
+  if (currentUser.role === 'manager') {
+    let totalRevenue = appData.invoices.filter(i => i.status === 'approved').reduce((s, i) => s + i.total, 0);
+    let totalExpenses = appData.expenses.reduce((s, e) => s + e.amount, 0);
+    let totalAcres = appData.invoices.filter(i => i.status === 'approved').reduce((s, i) => s + i.acres, 0);
+    let pending = appData.invoices.filter(i => i.status === 'pending').length;
+    let pendingBookings = appData.bookings.filter(b => b.status === 'pending').length;
+    let completedBookings = appData.bookings.filter(b => b.status === 'completed').length;
+    let droneRecovered = appData.invoices.filter(i => i.status === 'approved').reduce((s, i) => s + (i.total * 0.6), 0);
+    let fortyPool = totalRevenue * 0.4;
+    let fortyBalance = fortyPool - totalExpenses;
+    document.getElementById('contentArea').innerHTML = `<div class="grid-4"><div class="kpi-card"><div class="kpi-value">${formatCurrency(totalRevenue)}</div><div>Total Revenue</div></div><div class="kpi-card"><div class="kpi-value">${formatCurrency(totalRevenue - totalExpenses)}</div><div>Net Profit</div></div><div class="kpi-card"><div class="kpi-value">${totalAcres.toLocaleString()}</div><div>Acres Sprayed</div></div><div class="kpi-card"><div class="kpi-value">${pending}</div><div>Pending Approvals</div></div></div><div class="grid-3"><div class="kpi-card"><div class="kpi-value">${pendingBookings}</div><div>Pending Bookings</div></div><div class="kpi-card"><div class="kpi-value">${completedBookings}</div><div>Completed Bookings</div></div><div class="kpi-card"><div class="kpi-value">${appData.users.filter(u => u.active).length}</div><div>Active Employees</div></div></div><div class="finance-card"><h4>Drone Recovery Fund (60%)</h4><div class="amount">${formatCurrency(droneRecovered)}</div><div class="progress-bar"><div class="progress-fill" style="width:${Math.min(100, (droneRecovered / appData.totalDroneInvestment) * 100)}%"></div></div><div>Target: ${formatCurrency(appData.totalDroneInvestment)}</div></div><div class="finance-card"><h4>Operational Fund (40%)</h4><div class="amount">${formatCurrency(fortyBalance)}</div><div class="progress-bar"><div class="progress-fill" style="width:${Math.min(100, (totalExpenses / (fortyPool || 1)) * 100)}%"></div></div><div>Pool: ${formatCurrency(fortyPool)} | Expenses: ${formatCurrency(totalExpenses)}</div></div><div class="card"><h3 class="card-title">Pending Approvals</h3><div id="pendingList"></div></div>`;
+    let pendingList = appData.invoices.filter(i => i.status === 'pending');
+    document.getElementById('pendingList').innerHTML = pendingList.map(i => `<div style="padding:10px; border-bottom:1px solid rgba(255,255,255,0.1);">${i.id} - ${i.farmer} - ${formatCurrency(i.total)} <button class="btn btn-primary btn-sm" onclick="openApprovalModal('${i.id}')">Approve</button></div>`).join('') || '<div>No pending approvals</div>';
+  } else if (currentUser.role === 'pilot') {
+    let myBookings = appData.bookings.filter(b => b.assignedTo === currentUser.id);
+    let completed = myBookings.filter(b => b.status === 'completed').length;
+    let pending = myBookings.filter(b => b.status === 'pending').length;
+    let totalAcres = myBookings.reduce((s, b) => s + b.acres, 0);
+    document.getElementById('contentArea').innerHTML = `<div class="grid-4"><div class="kpi-card"><div class="kpi-value">${myBookings.length}</div><div>Total Flights</div></div><div class="kpi-card"><div class="kpi-value">${totalAcres.toLocaleString()}</div><div>Total Acres</div></div><div class="kpi-card"><div class="kpi-value">${completed}</div><div>Completed</div></div><div class="kpi-card"><div class="kpi-value">${pending}</div><div>Pending</div></div></div><div class="card"><h3 class="card-title">My Recent Bookings</h3><div class="table-responsive"><table><thead><tr><th>ID</th><th>Farmer</th><th>Acres</th><th>Status</th><th>Action</th></tr></thead><tbody id="myBookingsList"></tbody></table></div></div>`;
+    document.getElementById('myBookingsList').innerHTML = myBookings.slice(0, 5).map(b => `<tr><td>${b.id}</td><td>${b.farmer}</td><td>${b.acres}</td><td><span class="badge ${b.status === 'completed' ? 'badge-completed' : 'badge-pending'}">${b.status}</span></td><td>${b.status === 'pending' ? `<button class="btn btn-success btn-sm" onclick="completeBooking('${b.id}')">Complete</button>` : '-'}</td></tr>`).join('') || '<tr><td colspan="5">No bookings</td></tr>';
+  } else if (currentUser.role === 'agri') {
+    let myBookings = appData.bookings.filter(b => b.createdBy === currentUser.id);
+    document.getElementById('contentArea').innerHTML = `<div class="grid-3"><div class="kpi-card"><div class="kpi-value">${myBookings.length}</div><div>Total Bookings</div></div><div class="kpi-card"><div class="kpi-value">${myBookings.filter(b => b.status === 'completed').length}</div><div>Completed</div></div><div class="kpi-card"><div class="kpi-value">${myBookings.filter(b => b.status === 'pending').length}</div><div>Pending</div></div></div><div class="card"><h3 class="card-title">My Bookings</h3><div class="table-responsive"></table><thead><tr><th>ID</th><th>Farmer</th><th>Acres</th><th>Status</th></tr></thead><tbody>${myBookings.map(b => `<tr><td>${b.id}</td><td>${b.farmer}</td><td>${b.acres}</td><td><span class="badge ${b.status === 'completed' ? 'badge-completed' : 'badge-pending'}">${b.status}</span></td></tr>`).join('')}</tbody></div></div>`;
+  }
+}
+
+function completeBooking(bookingId) {
+  let booking = appData.bookings.find(b => b.id === bookingId);
+  if (booking) {
+    booking.status = 'completed';
+    saveData();
+    // Push status update to Firebase immediately
+    if (window.firebaseReady && window.firebaseDB) {
+      window.firebaseUpdate(window.firebaseRef(window.firebaseDB, `bookings/${bookingId}`), { status: 'completed' })
+        .then(() => console.log('Booking status synced to Firebase'))
+        .catch(e => console.warn('Firebase update failed:', e));
+    }
+    addNotification(`✅ Booking ${bookingId} marked COMPLETED by Pilot ${currentUser.name}`, 'success', null);
+    toast(`Booking ${bookingId} marked as completed`);
+    renderDashboard();
+    if (currentUser.role === 'pilot') showPage('bookings');
+  }
+}
+
+// ==================== BOOKINGS ====================
+function renderBookings() {
+  let myBookings = currentUser.role === 'manager' ? appData.bookings : appData.bookings.filter(b => b.assignedTo === currentUser.id || b.createdBy === currentUser.id);
+  document.getElementById('contentArea').innerHTML = `<div class="card"><h3 class="card-title">New Booking</h3><div class="grid-2"><div><label>Farmer Name *</label><input id="bkFarmer"></div><div><label>Contact</label><input id="bkContact"></div><div><label>Acres *</label><input type="number" id="bkAcres" step="0.1" oninput="calcBookingTotal()"></div><div><label>Location</label><input id="bkLocation"></div><div><label>Crop</label><input id="bkCrop"></div><div><label>Spray Type</label><select id="bkSprayType"><option>Insecticides</option><option>Fungicides</option><option>Fertilizers</option></select></div><div><label>Product / Chemical</label><input id="bkProduct" placeholder="e.g. Chlorpyrifos 500ml/acre"></div><div><label>Price/Acre (₨)</label><input type="number" id="bkPrice" value="1500" oninput="calcBookingTotal()"></div><div><label>Discount/Acre (₨)</label><input type="number" id="bkDiscount" value="0" oninput="calcBookingTotal()"></div><div><label>Final Price/Acre</label><input id="bkFinalPrice" readonly></div><div><label>Total Amount</label><input id="bkTotal" readonly style="color:#ffb74d;"></div><div><label>Date</label><input type="date" id="bkDate" value="${today()}"></div><div><label>Assign Pilot</label><select id="bkPilot">${appData.users.filter(u => u.role === 'pilot' && u.active).map(p => `<option value="${p.id}">${p.name}</option>`).join('')}</select></div></div><button class="btn btn-primary" onclick="createBooking()">Create Booking</button></div><div class="card"><h3 class="card-title">${currentUser.role === 'manager' ? 'All Bookings' : 'My Bookings'}</h3><div class="table-responsive"><table><thead><tr><th>ID</th><th>Farmer</th><th>Acres</th><th>Final/Acre</th><th>Total</th><th>Status</th><th>Action</th></tr></thead><tbody id="bookingsList"></tbody></table></div></div>`;
+  calcBookingTotal();
+  document.getElementById('bookingsList').innerHTML = myBookings.map(b => `<tr><td>${b.id}</td><td>${b.farmer}</td><td>${b.acres}</td><td>${formatCurrency(b.finalPrice)}</td><td>${formatCurrency(b.total)}</td><td><span class="badge ${b.status === 'completed' ? 'badge-completed' : 'badge-pending'}">${b.status}</span></td><td>${b.status === 'pending' && currentUser.role === 'pilot' ? `<button class="btn btn-success btn-sm" onclick="completeBooking('${b.id}')">Complete</button>` : b.status === 'pending' ? `<button class="btn btn-primary btn-sm" onclick="loadBookingToInvoice('${b.id}')">Invoice</button>` : '-'} <button class="btn btn-danger btn-sm" onclick="deleteBookingItem('${b.id}')">Delete</button></td></tr>`).join('') || '<tr><td colspan="7">No bookings</td></tr>';
+  if (document.getElementById('bookingBadge')) document.getElementById('bookingBadge').innerText = appData.bookings.filter(b => b.status === 'pending').length;
+}
+
+function deleteBookingItem(id) { if (confirm('Delete this booking?')) { appData.bookings = appData.bookings.filter(b => b.id !== id); saveData(); renderBookings(); toast('Booking deleted'); } }
+function calcBookingTotal() { let a = parseFloat(document.getElementById('bkAcres').value) || 0, p = parseFloat(document.getElementById('bkPrice').value) || 0, d = parseFloat(document.getElementById('bkDiscount').value) || 0, f = Math.max(0, p - d), t = a * f; document.getElementById('bkFinalPrice').value = formatCurrency(f); document.getElementById('bkTotal').value = formatCurrency(t); }
+function createBooking() {
+  let acres = parseFloat(document.getElementById('bkAcres').value) || 0, price = parseFloat(document.getElementById('bkPrice').value) || 0, discount = parseFloat(document.getElementById('bkDiscount').value) || 0, finalPrice = Math.max(0, price - discount), total = acres * finalPrice, farmer = document.getElementById('bkFarmer').value;
+  if (!farmer || acres <= 0) { toast('Enter farmer name and acres', 'error'); return; }
+  let booking = { id: getBookingNumber(), farmer, contact: document.getElementById('bkContact').value, acres, location: document.getElementById('bkLocation').value, crop: document.getElementById('bkCrop').value, sprayType: document.getElementById('bkSprayType').value, product: document.getElementById('bkProduct').value, price, discount, finalPrice, total, date: document.getElementById('bkDate').value, assignedTo: document.getElementById('bkPilot').value, assignedToName: appData.users.find(u => u.id === document.getElementById('bkPilot').value)?.name, status: 'pending', createdBy: currentUser.id, createdByName: currentUser.name };
+  appData.bookings.push(booking);
+  saveData();
+  // Push to Firebase immediately for real-time update
+  if (window.firebaseReady && window.firebaseDB) {
+    window.firebaseUpdate(window.firebaseRef(window.firebaseDB, `bookings/${booking.id}`), booking)
+      .catch(e => console.warn('Firebase booking push failed:', e));
+  }
+  addNotification(`New booking ${booking.id} created for ${booking.farmer}`, 'info', 'manager');
+  addNotification(`New booking ${booking.id} assigned to you`, 'info', 'pilot');
+  renderBookings();
+  toast(`Booking ${booking.id} created`);
+  document.getElementById('bkFarmer').value = '';
+  document.getElementById('bkAcres').value = '';
+  calcBookingTotal();
+}
+let _pendingBookingLoad = null;
+function loadBookingToInvoice(bid) {
+  let b = appData.bookings.find(bk => bk.id === bid);
+  if (!b) { toast('Booking not found', 'error'); return; }
+  _pendingBookingLoad = b;
+  showPage('invoices');
+  // Fill fields after renderInvoices() has built the DOM
+  setTimeout(() => {
+    if (!_pendingBookingLoad) return;
+    let bk = _pendingBookingLoad;
+    _pendingBookingLoad = null;
+    let set = (id, val) => { let el = document.getElementById(id); if (el) el.value = val || ''; };
+    set('invFarmer', bk.farmer);
+    set('invContact', bk.contact);
+    set('invAcres', bk.acres);
+    set('invLocation', bk.location);
+    set('invCrop', bk.crop);
+    set('invProduct', bk.product);
+    set('invPrice', bk.price || 1500);
+    set('invDiscount', bk.discount || 0);
+    set('invBookingId', bk.id);
+    // Set spray type select
+    let stSel = document.getElementById('invSprayType');
+    if (stSel && bk.sprayType) {
+      for (let opt of stSel.options) { if (opt.value === bk.sprayType || opt.text === bk.sprayType) { stSel.value = opt.value; break; } }
+    }
+    // Highlight the booking in the dropdown
+    let sel = document.getElementById('invBookingSelect');
+    if (sel) sel.value = bk.id;
+    calculateInvoiceTotal();
+    toast(`✅ Booking ${bk.id} loaded — ${bk.farmer}`);
+  }, 100);
+}
+
+// ==================== INVOICES ====================
+function renderInvoices() {
+  let myInvoices = currentUser.role === 'manager' ? appData.invoices : appData.invoices.filter(i => i.pilotId === currentUser.id || i.createdBy === currentUser.id);
+  // Filter bookings available for invoicing per role
+  let availableBookings;
+  if (currentUser.role === 'agri') {
+    availableBookings = appData.bookings.filter(b => b.createdBy === currentUser.id && (b.status === 'pending' || b.status === 'completed'));
+  } else if (currentUser.role === 'pilot') {
+    availableBookings = appData.bookings.filter(b => b.assignedTo === currentUser.id && (b.status === 'pending' || b.status === 'completed'));
+  } else {
+    availableBookings = appData.bookings.filter(b => b.status === 'pending' || b.status === 'approved' || b.status === 'completed');
+  }
+  document.getElementById('contentArea').innerHTML = `<div class="card"><h3 class="card-title">Generate Invoice</h3><div class="grid-2"><div><label>Select Booking (Auto-Fill)</label><select id="invBookingSelect" onchange="if(this.value)loadBookingToInvoice(this.value)"><option value="">-- Select Booking --</option>${availableBookings.map(b => `<option value="${b.id}">${b.id} - ${b.farmer} (${b.acres}ac) by ${b.createdByName || 'Manager'}</option>`).join('')}</select></div><div><label>Farmer</label><input id="invFarmer"></div><div><label>Contact</label><input id="invContact"></div><div><label>Acres</label><input type="number" id="invAcres" oninput="calculateInvoiceTotal()"></div><div><label>Location</label><input id="invLocation"></div><div><label>Crop</label><input id="invCrop"></div><div><label>Spray Type</label><select id="invSprayType"><option>Insecticides</option><option>Fungicides</option></select></div><div><label>Product / Chemical</label><input id="invProduct" placeholder="e.g. Chlorpyrifos 500ml/acre"></div><div><label>Price/Acre</label><input type="number" id="invPrice" value="1500" oninput="calculateInvoiceTotal()"></div><div><label>Discount/Acre</label><input type="number" id="invDiscount" value="0" oninput="calculateInvoiceTotal()"></div><div><label>Final/Acre</label><input id="invFinalPrice" readonly></div><div><label>Total</label><input id="invTotal" readonly style="color:#ffb74d;"></div><div><label>Payment Method</label><select id="paymentMethod" onchange="document.getElementById('trxFieldGroup').style.display = this.value !== 'cash' ? 'block' : 'none'"><option value="cash">Cash</option><option value="easypaisa">EasyPaisa</option><option value="jazzcash">JazzCash</option><option value="bank">Bank Transfer</option></select></div><div id="trxFieldGroup" style="display:none;"><label>Transaction ID</label><input id="transactionId" placeholder="Enter TXN ID"></div><div><label>Amount Paid</label><input type="number" id="invPaid" oninput="calculateInvoiceChange()"></div><div><label>Change</label><input id="invChange" readonly></div><input type="hidden" id="invBookingId"></div><button class="btn btn-primary" onclick="createInvoice()">Submit for Approval</button></div><div class="card"><h3 class="card-title">Invoices</h3><div class="table-responsive"><table><thead><tr><th>ID</th><th>Farmer</th><th>Acres</th><th>Total</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody id="invoicesList"></tbody></table></div></div>`;
+  document.getElementById('invoicesList').innerHTML = myInvoices.map(i => `<tr><td>${i.id}</td><td>${i.farmer}</td><td>${i.acres}</td><td>${formatCurrency(i.total)}</td><td>${i.date}</td><td><span class="badge ${i.status === 'pending' ? 'badge-pending' : 'badge-approved'}">${i.status}</span></td><td><button class="btn btn-secondary btn-sm" onclick="printInvoice('${i.id}')">Print</button> ${currentUser.role === 'manager' && i.status === 'pending' ? `<button class="btn btn-primary btn-sm" onclick="openApprovalModal('${i.id}')">Approve</button>` : ''} <button class="btn btn-danger btn-sm" onclick="deleteInvoiceItem('${i.id}')">Delete</button></td></tr>`).join('') || '<tr><td colspan="7">No invoices</td></tr>';
+  if (document.getElementById('invoiceBadge')) document.getElementById('invoiceBadge').innerText = appData.invoices.filter(i => i.status === 'pending').length;
+}
+function deleteInvoiceItem(id) { if (confirm('Delete this invoice?')) { appData.invoices = appData.invoices.filter(i => i.id !== id); saveData(); renderInvoices(); renderDashboard(); toast('Invoice deleted'); } }
+function calculateInvoiceTotal() { let a = parseFloat(document.getElementById('invAcres').value) || 0, p = parseFloat(document.getElementById('invPrice').value) || 0, d = parseFloat(document.getElementById('invDiscount').value) || 0, f = Math.max(0, p - d), t = a * f; document.getElementById('invFinalPrice').value = formatCurrency(f); document.getElementById('invTotal').value = formatCurrency(t); calculateInvoiceChange(); }
+function calculateInvoiceChange() { let total = parseFloat((document.getElementById('invTotal').value || '₨0').replace(/[^0-9.-]/g, '')) || 0, paid = parseFloat(document.getElementById('invPaid').value) || 0; document.getElementById('invChange').value = paid >= total ? formatCurrency(paid - total) : `${formatCurrency(0)} (Need ${formatCurrency(total - paid)})`; }
+function createInvoice() {
+  let acres = parseFloat(document.getElementById('invAcres').value) || 0, price = parseFloat(document.getElementById('invPrice').value) || 0, discount = parseFloat(document.getElementById('invDiscount').value) || 0, finalPrice = Math.max(0, price - discount), total = acres * finalPrice, paid = parseFloat(document.getElementById('invPaid').value) || 0, farmer = document.getElementById('invFarmer').value;
+  if (!farmer || acres <= 0) { toast('Enter farmer name and acres', 'error'); return; }
+  if (paid < total) { toast('Amount paid is less than total', 'error'); return; }
+  let invoice = { id: getInvoiceNumber(), farmer, contact: document.getElementById('invContact').value, acres, location: document.getElementById('invLocation').value, crop: document.getElementById('invCrop').value, sprayType: document.getElementById('invSprayType').value, product: document.getElementById('invProduct').value, price, discount, finalPrice, total, paid, change: paid - total, bookingId: document.getElementById('invBookingId').value || null, date: today(), pilotId: currentUser.id, pilotName: currentUser.name, createdBy: currentUser.id, createdByName: currentUser.name, status: 'pending', paymentMethod: document.getElementById('paymentMethod').value, transactionId: document.getElementById('transactionId').value || '' };
+  appData.invoices.push(invoice);
+  if (invoice.bookingId) {
+    let bk = appData.bookings.find(b => b.id === invoice.bookingId);
+    if (bk) bk.status = 'invoiced';
+  }
+  saveData();
+  // Push invoice to Firebase immediately
+  if (window.firebaseReady && window.firebaseDB) {
+    window.firebaseUpdate(window.firebaseRef(window.firebaseDB, `invoices/${invoice.id}`), invoice)
+      .catch(e => console.warn('Firebase invoice push failed:', e));
+    if (invoice.bookingId) {
+      window.firebaseUpdate(window.firebaseRef(window.firebaseDB, `bookings/${invoice.bookingId}`), { status: 'invoiced' })
+        .catch(e => console.warn('Firebase booking update failed:', e));
+    }
+  }
+  addNotification(`New invoice ${invoice.id} submitted by ${currentUser.name}`, 'info', 'manager');
+  toast(`Invoice ${invoice.id} submitted`);
+  renderInvoices();
+  renderDashboard();
+}
+function openApprovalModal(iid) { let inv = appData.invoices.find(i => i.id === iid); document.getElementById('approvalContent').innerHTML = `<div>Invoice: ${inv.id}<br>Farmer: ${inv.farmer}<br>Total: ${formatCurrency(inv.total)}<br>Payment: ${inv.paymentMethod} ${inv.transactionId ? `(${inv.transactionId})` : ''}</div><div style="margin-top:20px;"><button class="btn btn-success" onclick="approveInvoice('${iid}',true)">Approve</button><button class="btn btn-danger" onclick="approveInvoice('${iid}',false)">Reject</button></div>`; document.getElementById('approvalModal').classList.add('open'); }
+function approveInvoice(iid, approved) { let inv = appData.invoices.find(i => i.id === iid); if (inv) { inv.status = approved ? 'approved' : 'rejected'; if (approved) { let recovery = inv.total * 0.6; appData.droneRecovered += recovery; addNotification(`Invoice ${iid} approved by Manager!`, 'success', 'pilot'); toast(`Invoice approved! ${formatCurrency(recovery)} added`); } else { addNotification(`Invoice ${iid} rejected by Manager`, 'error', 'pilot'); toast('Invoice rejected'); } saveData(); renderDashboard(); renderInvoices(); } closeModal('approvalModal'); }
+function printInvoice(iid) { let inv = appData.invoices.find(i => i.id === iid); if (!inv) return; currentInvoiceForPrint = inv; let html = `<div class="receipt-thermal" id="thermalReceipt"><div style="text-align:center;"><h3>${appData.companyName}</h3><p>Precision Spray Service</p></div><hr><div><strong>${inv.id}</strong> | ${inv.date}</div><hr><div>Farmer: ${inv.farmer}</div><div>Crop: ${inv.crop}</div><div>Acres: ${inv.acres}</div><div>Price/Acre: ${formatCurrency(inv.price)}</div><div>Discount: -${formatCurrency(inv.discount)}</div><div><strong>Final: ${formatCurrency(inv.finalPrice)}/acre</strong></div><hr><div><strong>Total: ${formatCurrency(inv.total)}</strong></div><div>Paid: ${formatCurrency(inv.paid)}</div><div>Method: ${inv.paymentMethod} ${inv.transactionId ? `(${inv.transactionId})` : ''}</div><hr><div style="text-align:center;color:#4caf50;">✅ PAID</div><div style="text-align:center;">🚁 ${appData.companyName}</div></div>`; document.getElementById('printContent').innerHTML = html; document.getElementById('printModal').classList.add('open'); }
+async function printInvoicePDF() { const { jsPDF } = window.jspdf; let el = document.getElementById('thermalReceipt'); if (!el) return; let canvas = await html2canvas(el, { scale: 2 }); let img = canvas.toDataURL('image/png'); let pdf = new jsPDF({ unit: 'mm', format: 'a4' }); let w = 190, h = (canvas.height * w) / canvas.width; pdf.addImage(img, 'PNG', 10, 10, w, h); pdf.save(`Invoice_${currentInvoiceForPrint?.id || Date.now()}.pdf`); toast('PDF saved'); }
+function printThermalReceipt() { let c = document.getElementById('thermalReceipt'); if (!c) return; let win = window.open('', '_blank', 'width=380,height=650'); win.document.write(`<html><head><title>Receipt</title><style>body{font-family:monospace;padding:15px;background:white;color:black;}</style></head><body>${c.outerHTML}<script>window.print();window.close();<\/script></body></html>`); win.document.close(); }
+
+// ==================== EXPENSES - FULLY WORKING DELETE ====================
+function renderExpenses() {
+  if (currentUser.role !== 'manager') { document.getElementById('contentArea').innerHTML = '<div class="card">Access Denied</div>'; return; }
+  let totalRevenue = appData.invoices.filter(i => i.status === 'approved').reduce((s, i) => s + i.total, 0);
   let fortyPool = totalRevenue * 0.4;
-  let fortyBalance = fortyPool - totalExpenses;
-  let droneRecovered = realtimeInvoices.filter(i => i.status === 'approved').reduce((s, i) => s + (i.total * 0.6), 0);
-  
+  let salaryExpenses = appData.expenses.filter(e => e.category === 'Salary');
+  let operationalExpenses = appData.expenses.filter(e => e.category !== 'Salary');
+  let totalSalary = salaryExpenses.reduce((s, e) => s + e.amount, 0);
+  let totalOpsExp = operationalExpenses.reduce((s, e) => s + e.amount, 0);
+  let totalExp = appData.expenses.reduce((s, e) => s + e.amount, 0);
+  let remaining = fortyPool - totalExp;
+  document.getElementById('contentArea').innerHTML = `
+    <div class="grid-3">
+      <div class="kpi-card"><div class="kpi-value">${formatCurrency(fortyPool)}</div><div>40% Operational Fund</div></div>
+      <div class="kpi-card" style="border-color:rgba(239,83,80,0.3);"><div class="kpi-value" style="color:#ef5350;">${formatCurrency(totalSalary)}</div><div>👥 Total Salaries Paid</div></div>
+      <div class="kpi-card" style="border-color:rgba(255,152,0,0.3);"><div class="kpi-value" style="color:#ff9800;">${formatCurrency(totalOpsExp)}</div><div>⚙️ Operational Expenses</div></div>
+    </div>
+    <div class="finance-card"><h4>40% Operational Fund Balance</h4><div class="amount">${formatCurrency(remaining)} Remaining</div><div class="progress-bar"><div class="progress-fill" style="width:${Math.min(100, (totalExp / (fortyPool || 1)) * 100)}%"></div></div><div>Pool: ${formatCurrency(fortyPool)} | Total Spent: ${formatCurrency(totalExp)}</div></div>
+    <div class="card"><h3 class="card-title">👥 Salary Breakdown (Per Employee)</h3><div class="table-responsive"><table><thead><tr><th>Employee</th><th>Role</th><th>Monthly Salary</th><th>Status</th></tr></thead><tbody>${appData.users.filter(u => u.active && u.status === 'active').map(u => `<tr><td>${u.name}</td><td>${u.role}</td><td style="color:#ef5350; font-weight:600;">${formatCurrency(u.salary || 0)}</td><td><span class="badge badge-active">Active</span></td></tr>`).join('')}<tr style="border-top:2px solid rgba(255,255,255,0.2);"><td colspan="2"><strong>Total</strong></td><td style="color:#ef5350; font-weight:800;">${formatCurrency(appData.users.filter(u => u.active && u.status === 'active').reduce((s, u) => s + (u.salary || 0), 0))}</td><td></td></tr></tbody></table></div></div>
+    <div class="card"><h3>Add Expense</h3><div class="grid-2"><div><label>Date</label><input type="date" id="expDate" value="${today()}"></div><div><label>Category</label><select id="expCategory"><option>Fuel</option><option>Maintenance</option><option>Salary</option><option>Equipment</option><option>Other</option></select></div><div><label>Amount</label><input type="number" id="expAmount"></div><div><label>Description</label><input id="expDesc"></div></div><button class="btn btn-primary" onclick="addExpense()">Add Expense</button></div>
+    <div class="card"><h3 class="card-title">⚙️ Operational Expenses</h3><div class="table-responsive"><table><thead><tr><th>Date</th><th>Category</th><th>Amount</th><th>Description</th><th>Action</th></tr></thead><tbody id="expensesList"></tbody></table></div></div>
+    <div class="card"><h3 class="card-title">👥 Salary Payment History</h3><div class="table-responsive"><table><thead><tr><th>Date</th><th>Employee</th><th>Role</th><th>Amount</th><th>Description</th><th>Action</th></tr></thead><tbody id="salaryList"></tbody></table></div></div>`;
+  document.getElementById('expensesList').innerHTML = operationalExpenses.map(e => `<tr><td>${e.date}</td><td>${e.category}</td><td>${formatCurrency(e.amount)}</td><td>${e.description || '-'}</td><td><button class="btn btn-danger btn-sm" onclick="deleteExpenseItem(${e.id})">Delete</button></td></tr>`).join('') || '<tr><td colspan="5">No operational expenses</td></tr>';
+  document.getElementById('salaryList').innerHTML = salaryExpenses.map(e => `<tr><td>${e.date}</td><td>${e.employeeName || '-'}</td><td>${e.employeeRole || '-'}</td><td style="color:#ef5350; font-weight:600;">${formatCurrency(e.amount)}</td><td>${e.description || '-'}</td><td><button class="btn btn-danger btn-sm" onclick="deleteExpenseItem(${e.id})">Delete</button></td></tr>`).join('') || '<tr><td colspan="6">No salary records — click "Process Monthly Salary" in Employees</td></tr>';
+}
+function addExpense() { let amt = parseFloat(document.getElementById('expAmount').value) || 0; if (amt <= 0) { toast('Enter amount', 'error'); return; } let expense = { id: Date.now(), date: document.getElementById('expDate').value, category: document.getElementById('expCategory').value, amount: amt, description: document.getElementById('expDesc').value }; appData.expenses.push(expense); saveData(); renderExpenses(); renderDashboard(); toast(`Expense of ${formatCurrency(amt)} added`); document.getElementById('expAmount').value = ''; document.getElementById('expDesc').value = ''; }
+function deleteExpenseItem(id) { if (confirm('Delete this expense?')) { appData.expenses = appData.expenses.filter(e => e.id !== id); saveData(); renderExpenses(); renderDashboard(); toast('Expense deleted - Fund updated'); } }
+
+// ==================== INVESTMENTS, DRONES, EMPLOYEES, SETTINGS ====================
+function renderInvestments() {
+  if (currentUser.role !== 'manager') { document.getElementById('contentArea').innerHTML = '<div class="card">Access Denied</div>'; return; }
+  let totalInv = appData.investments.filter(i => i.type === 'investment').reduce((s, i) => s + i.amount, 0);
+  let totalRec = appData.investments.filter(i => i.type === 'recovery').reduce((s, i) => s + i.amount, 0);
+  let netBalance = totalInv - totalRec;
+  document.getElementById('contentArea').innerHTML = `
+    <div class="grid-3">
+      <div class="kpi-card"><div class="kpi-value" style="color:#4caf50;">${formatCurrency(totalInv)}</div><div>Total Invested</div></div>
+      <div class="kpi-card"><div class="kpi-value" style="color:#ef5350;">${formatCurrency(totalRec)}</div><div>Total Recovered</div></div>
+      <div class="kpi-card"><div class="kpi-value" style="color:#ffb74d;">${formatCurrency(netBalance)}</div><div>Net Balance</div></div>
+    </div>
+    <div class="card">
+      <h3 class="card-title">📝 Record Transaction</h3>
+      <div class="grid-2">
+        <div><label>Investor / Partner Name *</label><input id="invPartner" placeholder="e.g. Muhammad Aslam"></div>
+        <div><label>Amount (₨) *</label><input type="number" id="invAmount" placeholder="0"></div>
+        <div><label>Transaction Type *</label>
+          <select id="invType" onchange="toggleInvTrxMethod()">
+            <option value="investment">💰 Investment (Money In)</option>
+            <option value="recovery">🔄 Recovery (Money Out)</option>
+          </select>
+        </div>
+        <div><label>Payment Method</label>
+          <select id="invPayMethod" onchange="toggleInvTrxId()">
+            <option value="cash">💵 Cash</option>
+            <option value="bank">🏦 Bank Transfer</option>
+            <option value="easypaisa">📱 EasyPaisa</option>
+            <option value="jazzcash">📱 JazzCash</option>
+            <option value="cheque">🧾 Cheque</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div id="invTrxIdGroup"><label>Transaction / Reference ID</label><input id="invTrxId" placeholder="e.g. TXN12345 or Cheque No."></div>
+        <div><label>Date *</label><input type="date" id="invDate" value="${today()}"></div>
+        <div style="grid-column: 1 / -1;"><label>Notes / Description</label><textarea id="invNotes" rows="2" placeholder="Optional remarks..."></textarea></div>
+      </div>
+      <div style="margin-top:16px;">
+        <button class="btn btn-primary" onclick="addInvestment()"><i class="fas fa-plus-circle"></i> Record Transaction</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+        <h3 class="card-title" style="margin:0; border:none; padding:0;">📋 Transaction History</h3>
+        <select id="invTypeFilter" onchange="renderInvestmentsList()" style="padding:8px 14px; border-radius:40px; width:180px;">
+          <option value="">All Transactions</option>
+          <option value="investment">Investments Only</option>
+          <option value="recovery">Recoveries Only</option>
+        </select>
+      </div>
+      <div class="table-responsive">
+        <table><thead><tr>
+          <th>#</th><th>Date</th><th>Investor</th><th>Type</th><th>Method</th><th>TRX / Ref ID</th><th>Amount</th><th>Notes</th><th>Action</th>
+        </tr></thead><tbody id="investmentsList"></tbody></table>
+      </div>
+    </div>`;
+  renderInvestmentsList();
+}
+
+function toggleInvTrxMethod() {
+  // can extend later
+}
+
+function toggleInvTrxId() {
+  let method = document.getElementById('invPayMethod')?.value;
+  let grp = document.getElementById('invTrxIdGroup');
+  if (grp) grp.style.display = method === 'cash' ? 'none' : 'block';
+}
+
+function renderInvestmentsList() {
+  let filter = document.getElementById('invTypeFilter')?.value || '';
+  let list = filter ? appData.investments.filter(i => i.type === filter) : appData.investments;
+  list = [...list].reverse(); // newest first
+  document.getElementById('investmentsList').innerHTML = list.length === 0
+    ? '<tr><td colspan="9" style="text-align:center; padding:30px; color:rgba(255,255,255,0.4);">No transactions recorded</td></tr>'
+    : list.map((i, idx) => `<tr>
+        <td style="color:rgba(255,255,255,0.4); font-size:11px;">${list.length - idx}</td>
+        <td style="font-size:12px;">${i.date}</td>
+        <td><strong>${i.partner}</strong></td>
+        <td><span class="badge" style="background:${i.type==='investment'?'rgba(76,175,80,0.2)':'rgba(239,83,80,0.2)'}; color:${i.type==='investment'?'#4caf50':'#ef5350'};">${i.type==='investment'?'💰 Investment':'🔄 Recovery'}</span></td>
+        <td style="font-size:12px;">${i.paymentMethod||'Cash'}</td>
+        <td style="font-size:12px; color:#00bcd4; font-weight:600;">${i.trxId || '<span style="color:rgba(255,255,255,0.3);">—</span>'}</td>
+        <td style="color:${i.type==='investment'?'#4caf50':'#ef5350'}; font-weight:700;">${formatCurrency(i.amount)}</td>
+        <td style="font-size:11px; color:rgba(255,255,255,0.5); max-width:150px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${i.notes||'—'}</td>
+        <td><button class="btn btn-danger btn-sm" onclick="deleteInvestment(${i.id})"><i class="fas fa-trash"></i></button></td>
+      </tr>`).join('');
+}
+
+function addInvestment() {
+  let amt = parseFloat(document.getElementById('invAmount').value) || 0;
+  let partner = document.getElementById('invPartner').value.trim();
+  if (!partner) { toast('Investor / partner name is required', 'error'); return; }
+  if (amt <= 0) { toast('Enter a valid amount', 'error'); return; }
+  let type = document.getElementById('invType').value;
+  let paymentMethod = document.getElementById('invPayMethod').value;
+  let trxId = document.getElementById('invTrxId').value.trim();
+  let notes = document.getElementById('invNotes').value.trim();
+  let record = {
+    id: Date.now(),
+    partner, amount: amt, type, date: document.getElementById('invDate').value,
+    paymentMethod, trxId, notes
+  };
+  appData.investments.push(record);
+  if (type === 'investment') appData.totalDroneInvestment += amt;
+  else if (type === 'recovery') appData.droneRecovered += amt;
+  saveData();
+  renderInvestments();
+  renderDashboard();
+  toast(`✅ ${type === 'investment' ? 'Investment' : 'Recovery'} of ${formatCurrency(amt)} recorded`);
+}
+
+function deleteInvestment(id) {
+  if (!confirm('Delete this transaction permanently?')) return;
+  let rec = appData.investments.find(i => i.id === id);
+  if (rec) {
+    if (rec.type === 'investment') appData.totalDroneInvestment -= rec.amount;
+    else if (rec.type === 'recovery') appData.droneRecovered -= rec.amount;
+  }
+  appData.investments = appData.investments.filter(i => i.id !== id);
+  saveData(); renderInvestments(); renderDashboard();
+  toast('Transaction deleted');
+}
+function renderDrones() { if (currentUser.role !== 'manager') { document.getElementById('contentArea').innerHTML = '<div class="card">Access Denied</div>'; return; } document.getElementById('contentArea').innerHTML = `<div class="card"><h3>Add New Drone</h3><div class="grid-2"><div><label>Drone Name</label><input id="droneName" placeholder="e.g., DJI Agras T40"></div><div><label>Status</label><select id="droneStatus"><option value="active">Active</option><option value="maintenance">Maintenance</option><option value="inactive">Inactive</option></select></div></div><button class="btn btn-primary" onclick="addDrone()">Add Drone</button></div><div class="card"><h3>Drone Fleet</h3><div class="drone-grid" id="dronesGrid"></div></div>`; document.getElementById('dronesGrid').innerHTML = appData.drones.map(d => `<div class="drone-card"><button class="drone-delete" onclick="deleteDroneItem('${d.id}')"><i class="fas fa-trash"></i></button><div class="drone-icon">🚁</div><div class="drone-name">${d.name}</div><div>Status: ${d.status}</div><div>Flights: ${d.totalFlights || 0}</div><div>Hours: ${(d.totalHours || 0).toFixed(1)}</div><div style="display:flex; gap:8px; justify-content:center; margin-top:10px;"><button class="btn btn-sm btn-success" onclick="updateDroneStatus('${d.id}','active')">Active</button><button class="btn btn-sm btn-warning" onclick="updateDroneStatus('${d.id}','maintenance')">Maint</button><button class="btn btn-sm btn-danger" onclick="updateDroneStatus('${d.id}','inactive')">Inactive</button></div></div>`).join(''); }
+function updateDroneStatus(did, status) { let d = appData.drones.find(d => d.id === did); if (d) { d.status = status; saveData(); renderDrones(); toast(`${d.name} status updated to ${status}`); } }
+function addDrone() { let n = document.getElementById('droneName').value, s = document.getElementById('droneStatus').value; if (!n) { toast('Enter drone name', 'error'); return; } appData.drones.push({ id: "DR" + Date.now(), name: n, status: s, totalFlights: 0, totalHours: 0 }); saveData(); renderDrones(); toast(`Drone ${n} added`); document.getElementById('droneName').value = ''; }
+function deleteDroneItem(id) { if (confirm('Remove this drone permanently?')) { appData.drones = appData.drones.filter(d => d.id !== id); saveData(); renderDrones(); toast('Drone removed'); } }
+function renderEmployees() {
+  if (currentUser.role !== 'manager') { document.getElementById('contentArea').innerHTML = '<div class="card">Access Denied</div>'; return; }
+  let pilots = appData.users.filter(u => u.role === 'pilot');
+  let agris = appData.users.filter(u => u.role === 'agri');
+  let managers = appData.users.filter(u => u.role === 'manager');
+  let activeCount = appData.users.filter(u => u.active && u.status === 'active').length;
+  let totalSalaryBill = appData.users.filter(u => u.active && u.status === 'active').reduce((s,u) => s+(u.salary||0), 0);
+
   document.getElementById('contentArea').innerHTML = `
     <div class="grid-4">
-      <div class="kpi-card"><div class="kpi-value">${formatCurrency(totalRevenue)}</div><div>Total Revenue</div></div>
-      <div class="kpi-card"><div class="kpi-value">${formatCurrency(totalRevenue - totalExpenses)}</div><div>Net Profit</div></div>
-      <div class="kpi-card"><div class="kpi-value">${realtimeInvoices.filter(i=>i.status==='pending').length}</div><div>Pending Approvals</div></div>
-      <div class="kpi-card"><div class="kpi-value">${realtimeBookings.filter(b=>b.status==='pending').length}</div><div>Pending Bookings</div></div>
+      <div class="kpi-card"><div class="kpi-value">${appData.users.length}</div><div>Total Staff</div></div>
+      <div class="kpi-card"><div class="kpi-value" style="color:#4caf50;">${activeCount}</div><div>Active</div></div>
+      <div class="kpi-card"><div class="kpi-value" style="color:#00bcd4;">${pilots.length} / ${agris.length}</div><div>Pilots / Agri Officers</div></div>
+      <div class="kpi-card"><div class="kpi-value" style="color:#ef5350;">${formatCurrency(totalSalaryBill)}</div><div>Monthly Salary Bill</div></div>
     </div>
-    <div class="finance-card"><h4>💰 Drone Recovery Fund (60%)</h4><div class="amount">${formatCurrency(droneRecovered)}</div><div class="progress-bar"><div class="progress-fill" style="width:${Math.min(100, (droneRecovered / 2000000) * 100)}%"></div></div><div>Target: ${formatCurrency(2000000)}</div></div>
-    <div class="finance-card"><h4>📊 Operational Fund (40%)</h4><div class="amount">${formatCurrency(fortyBalance)} Remaining</div><div class="progress-bar"><div class="progress-fill" style="width:${Math.min(100, (totalExpenses / (fortyPool || 1)) * 100)}%"></div></div><div>Pool: ${formatCurrency(fortyPool)} | Expenses: ${formatCurrency(totalExpenses)}</div></div>
-    <div class="card"><h3 class="card-title">Real-Time Status</h3><p>✅ Connected to Firebase Realtime Database. All data syncs instantly across all users.</p><p><span class="status-badge">Live</span> Changes appear immediately in all logged-in devices.</p></div>`;
+    <div class="card">
+      <h3 class="card-title">➕ Add New Employee</h3>
+      <div class="grid-2">
+        <div><label>Full Name *</label><input id="empName" placeholder="e.g. Ali Raza"></div>
+        <div><label>Login Email *</label><input id="empEmail" type="email" placeholder="ali@example.com"></div>
+        <div><label>Login Password *</label><input id="empPassword" type="text" placeholder="Min 6 characters"></div>
+        <div><label>Role *</label><select id="empRole"><option value="pilot">✈️ Drone Pilot</option><option value="agri">🌾 Agri Officer</option><option value="manager">👑 Manager</option></select></div>
+        <div><label>Monthly Salary (₨)</label><input type="number" id="empSalary" placeholder="0"></div>
+        <div><label>Join Date</label><input type="date" id="empJoinDate" value="${today()}"></div>
+        <div><label>Phone</label><input id="empPhone" placeholder="+92 300 0000000"></div>
+        <div><label>CNIC / ID</label><input id="empCnic" placeholder="42201-0000000-0"></div>
+      </div>
+      <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-primary" onclick="addEmployee()"><i class="fas fa-user-plus"></i> Add Employee</button>
+      </div>
+    </div>
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;">
+        <h3 class="card-title" style="margin:0; border:none; padding:0;">👥 Team Directory</h3>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <input id="empSearch" placeholder="🔍 Search name or email..." oninput="filterEmployees()" style="width:220px; padding:8px 14px; border-radius:40px;">
+          <select id="empRoleFilter" onchange="filterEmployees()" style="padding:8px 14px; border-radius:40px; width:160px;">
+            <option value="">All Roles</option>
+            <option value="manager">Manager</option>
+            <option value="pilot">Drone Pilot</option>
+            <option value="agri">Agri Officer</option>
+          </select>
+          <select id="empStatusFilter" onchange="filterEmployees()" style="padding:8px 14px; border-radius:40px; width:140px;">
+            <option value="">All Status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table><thead><tr>
+          <th>#</th><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Salary</th><th>Join Date</th><th>Status</th><th>Actions</th>
+        </tr></thead><tbody id="employeesList"></tbody></table>
+      </div>
+    </div>
+    <div class="card" style="display:flex; gap:12px; flex-wrap:wrap;">
+      <button class="btn btn-success" onclick="processMonthlySalary()"><i class="fas fa-money-bill-wave"></i> Process Monthly Salary</button>
+      <button class="btn btn-secondary" onclick="openChangePassword()"><i class="fas fa-key"></i> Change My Password</button>
+    </div>`;
+  filterEmployees();
 }
 
-// Simple placeholders for other pages (they work but simplified)
-function renderBookings() { document.getElementById('contentArea').innerHTML = `<div class="card"><h3>Bookings (Real-Time)</h3><div class="table-responsive"><table><thead><tr><th>ID</th><th>Farmer</th><th>Acres</th><th>Status</th></tr></thead><tbody>${realtimeBookings.map(b=>`<tr><td>${b.id}</td><td>${b.farmer}</td><td>${b.acres}</td><td>${b.status}</td></tr>`).join('')}</tbody></table></div><button class="btn btn-primary" onclick="toast('Create booking feature active')">+ New Booking</button></div>`; }
-function renderInvoices() { document.getElementById('contentArea').innerHTML = `<div class="card"><h3>Invoices</h3><div class="table-responsive"><table><thead><tr><th>ID</th><th>Farmer</th><th>Total</th><th>Status</th></table></thead><tbody>${realtimeInvoices.map(i=>`<tr><td>${i.id}</td><td>${i.farmer}</td><td>${formatCurrency(i.total)}</td><td>${i.status}</td></tr>`).join('')}</tbody><table></div></div>`; }
-function renderExpenses() { document.getElementById('contentArea').innerHTML = `<div class="card"><h3>Expenses Overview</h3><p>Total Company Expenses: ${formatCurrency(realtimeExpenses.reduce((s,e)=>s+e.amount,0))}</p><p>Total Employee Expenses: ${formatCurrency(realtimeEmployeeExpenses.reduce((s,e)=>s+e.amount,0))}</p><button class="btn btn-primary" onclick="toast('Add expense feature active')">Add Expense</button></div>`; }
-function renderInvestments() { document.getElementById('contentArea').innerHTML = `<div class="card"><h3>Investments</h3><div class="table-responsive"><table><thead><tr><th>Date</th><th>Investor</th><th>Type</th><th>Amount</th></tr></thead><tbody>${realtimeInvestments.map(i=>`<tr><td>${i.date}</td><td>${i.investorName||i.partner}</td><td>${i.type}</td><td>${formatCurrency(i.amount)}</td></tr>`).join('')}</tbody></table></div></div>`; }
-function renderDrones() { document.getElementById('contentArea').innerHTML = `<div class="card"><h3>Drone Fleet</h3><div class="drone-grid">${realtimeDrones.map(d=>`<div class="drone-card"><div class="drone-icon">🚁</div><div>${d.name}</div><div>Status: ${d.status}</div></div>`).join('')}</div></div>`; }
-function renderEmployees() { document.getElementById('contentArea').innerHTML = `<div class="card"><h3>Team Members</h3><div class="table-responsive"><table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Password</th></tr></thead><tbody>${realtimeUsers.map(u=>`<tr><td>${u.name}</td><td>${u.email}</td><td>${u.role}</td><td><span style="font-family:monospace;">${u.password}</span> <button class="btn btn-sm btn-outline" onclick="navigator.clipboard.writeText('${u.password}')">📋</button></td></tr>`).join('')}</tbody></table></div><button class="btn btn-secondary" onclick="openChangePassword()">Change My Password</button></div>`; }
-function renderSettings() { document.getElementById('contentArea').innerHTML = `<div class="card"><h3>Settings</h3><p>Firebase Realtime Database connected successfully.</p><p>Data syncs across all devices in real-time.</p><button class="btn btn-secondary" onclick="openChangePassword()">Change Password</button></div>`; }
-function showNotifications() { document.getElementById('notificationsList').innerHTML = '<div>No new notifications</div>'; document.getElementById('notificationsModal').classList.add('open'); }
+function filterEmployees() {
+  let search = (document.getElementById('empSearch')?.value || '').toLowerCase();
+  let roleF = document.getElementById('empRoleFilter')?.value || '';
+  let statusF = document.getElementById('empStatusFilter')?.value || '';
+  let filtered = appData.users.filter(u => {
+    let matchSearch = !search || u.name.toLowerCase().includes(search) || u.email.toLowerCase().includes(search) || (u.phone||'').includes(search);
+    let matchRole = !roleF || u.role === roleF;
+    let matchStatus = !statusF || u.status === statusF;
+    return matchSearch && matchRole && matchStatus;
+  });
+  const roleLabel = { manager: '👑 Manager', pilot: '✈️ Pilot', agri: '🌾 Agri Officer' };
+  document.getElementById('employeesList').innerHTML = filtered.length === 0
+    ? '<tr><td colspan="9" style="text-align:center; padding:30px; color:rgba(255,255,255,0.4);">No employees found</td></tr>'
+    : filtered.map((u, idx) => `<tr>
+        <td style="color:rgba(255,255,255,0.4); font-size:11px;">${idx+1}</td>
+        <td><strong>${u.name}</strong></td>
+        <td style="font-size:12px; color:rgba(255,255,255,0.6);">${u.email}</td>
+        <td><span class="badge" style="background:${u.role==='manager'?'rgba(255,183,77,0.2)':u.role==='pilot'?'rgba(0,188,212,0.2)':'rgba(76,175,80,0.2)'}; color:${u.role==='manager'?'#ffb74d':u.role==='pilot'?'#00bcd4':'#4caf50'};">${roleLabel[u.role]||u.role}</span></td>
+        <td style="font-size:12px;">${u.phone||'-'}</td>
+        <td style="color:#ffb74d; font-weight:600;">${formatCurrency(u.salary||0)}</td>
+        <td style="font-size:12px;">${u.joinDate||'-'}</td>
+        <td><span class="badge ${u.status==='active'?'badge-active':'badge-pending'}">${u.status}</span></td>
+        <td style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button class="btn btn-sm btn-outline" onclick="viewEmployeePassword('${u.id}')" title="View Credentials"><i class="fas fa-key"></i></button>
+          <button class="btn btn-sm btn-outline" onclick="editEmployeeSalary('${u.id}')" title="Edit Salary"><i class="fas fa-edit"></i></button>
+          ${u.status==='active' ? `<button class="btn btn-sm btn-danger" onclick="updateEmployeeStatus('${u.id}','inactive')" title="Deactivate">Deactivate</button>` : `<button class="btn btn-sm btn-success" onclick="updateEmployeeStatus('${u.id}','active')" title="Activate">Activate</button>`}
+          ${u.id !== 'u1' ? `<button class="btn btn-sm btn-danger" onclick="deleteEmployeeItem('${u.id}')" title="Delete"><i class="fas fa-trash"></i></button>` : ''}
+        </td>
+      </tr>`).join('');
+}
+function addEmployee() {
+  let name = document.getElementById('empName').value.trim(),
+      email = document.getElementById('empEmail').value.trim().toLowerCase(),
+      password = document.getElementById('empPassword').value.trim(),
+      role = document.getElementById('empRole').value,
+      salary = parseFloat(document.getElementById('empSalary').value) || 0,
+      phone = document.getElementById('empPhone').value.trim(),
+      cnic = document.getElementById('empCnic').value.trim();
+  if (!name) { toast('Employee name is required', 'error'); return; }
+  if (!email || !email.includes('@')) { toast('Valid email address is required', 'error'); return; }
+  if (!password || password.length < 4) { toast('Password must be at least 4 characters', 'error'); return; }
+  if (appData.users.find(u => u.email.toLowerCase() === email)) { toast('This email is already registered', 'error'); return; }
+  let newUser = {
+    id: 'u_' + Date.now(),
+    email, password, role, name,
+    active: true,
+    joinDate: document.getElementById('empJoinDate').value || today(),
+    salary, phone, cnic,
+    status: 'active'
+  };
+  appData.users.push(newUser);
+  saveData();
+  // Push user to Firebase immediately so they can login from any device
+  if (window.firebaseReady && window.firebaseDB) {
+    window.firebaseUpdate(window.firebaseRef(window.firebaseDB, `users/${newUser.id}`), newUser)
+      .then(() => toast(`✅ ${name} added & synced — login: ${email}`))
+      .catch(() => toast(`✅ ${name} added locally — sync pending`));
+  } else {
+    toast(`✅ ${name} added — login: ${email}`);
+  }
+  renderEmployees();
+  ['empName','empEmail','empPassword','empSalary','empPhone','empCnic'].forEach(id => { let el = document.getElementById(id); if(el) el.value = ''; });
+}
+
+function editEmployeeSalary(uid) {
+  let u = appData.users.find(u => u.id === uid);
+  if (!u) return;
+  let newSalary = prompt(`Edit monthly salary for ${u.name} (current: ₨ ${(u.salary||0).toLocaleString()}):`, u.salary || 0);
+  if (newSalary === null) return;
+  let parsed = parseFloat(newSalary);
+  if (isNaN(parsed) || parsed < 0) { toast('Invalid salary amount', 'error'); return; }
+  u.salary = parsed;
+  saveData();
+  renderEmployees();
+  toast(`✅ Salary updated for ${u.name}: ${formatCurrency(parsed)}`);
+}
+function updateEmployeeStatus(uid, status) { let u = appData.users.find(u => u.id === uid); if (u) { u.status = status; u.active = (status === 'active'); saveData(); renderEmployees(); toast(`${u.name} status updated`); } }
+function deleteEmployeeItem(uid) { if (confirm('Delete employee permanently?')) { appData.users = appData.users.filter(u => u.id !== uid); saveData(); renderEmployees(); toast('Employee deleted'); } }
+function viewEmployeePassword(uid) {
+  let u = appData.users.find(u => u.id === uid);
+  if (!u) return;
+  const roleLabel = { manager: '👑 Manager', pilot: '✈️ Drone Pilot', agri: '🌾 Agri Officer' };
+  document.getElementById('passwordContent').innerHTML = `
+    <div style="background:rgba(0,0,0,0.3); border-radius:16px; padding:20px; margin-bottom:16px;">
+      <div style="font-size:13px; color:rgba(255,255,255,0.5); margin-bottom:4px;">Employee</div>
+      <div style="font-size:18px; font-weight:700;">${u.name}</div>
+      <div style="margin-top:4px;"><span class="badge" style="background:rgba(255,183,77,0.2); color:#ffb74d;">${roleLabel[u.role]||u.role}</span> <span class="badge ${u.status==='active'?'badge-active':'badge-pending'}">${u.status}</span></div>
+    </div>
+    <div style="margin-bottom:12px;"><label>Login Email</label>
+      <div style="display:flex; gap:8px;">
+        <input type="text" value="${u.email}" readonly id="credEmail" style="flex:1;">
+        <button class="btn btn-sm btn-outline" onclick="copyField('credEmail')"><i class="fas fa-copy"></i></button>
+      </div>
+    </div>
+    <div style="margin-bottom:12px;"><label>Login Password</label>
+      <div style="display:flex; gap:8px;">
+        <input type="text" value="${u.password}" readonly id="credPwd" style="flex:1;">
+        <button class="btn btn-sm btn-outline" onclick="copyField('credPwd')"><i class="fas fa-copy"></i></button>
+      </div>
+    </div>
+    <div style="margin-bottom:16px;"><label>Login URL</label>
+      <div style="display:flex; gap:8px;">
+        <input type="text" value="${window.location.href}" readonly id="credUrl" style="flex:1; font-size:11px;">
+        <button class="btn btn-sm btn-outline" onclick="copyField('credUrl')"><i class="fas fa-copy"></i></button>
+      </div>
+    </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <button class="btn btn-primary" onclick="copyAllCredentials('${u.id}')"><i class="fas fa-share"></i> Copy All Credentials</button>
+      <button class="btn btn-outline" onclick="closeModal('viewPasswordModal')">Close</button>
+    </div>`;
+  document.getElementById('viewPasswordModal').classList.add('open');
+}
+
+function copyField(id) {
+  let el = document.getElementById(id);
+  if (!el) return;
+  navigator.clipboard.writeText(el.value).then(() => toast('Copied!')).catch(() => { el.select(); document.execCommand('copy'); toast('Copied!'); });
+}
+
+function copyAllCredentials(uid) {
+  let u = appData.users.find(u => u.id === uid);
+  if (!u) return;
+  let text = `AgriSpray Pro — Login Credentials\nName: ${u.name}\nRole: ${u.role}\nEmail: ${u.email}\nPassword: ${u.password}\nURL: ${window.location.href}`;
+  navigator.clipboard.writeText(text).then(() => toast('✅ All credentials copied!')).catch(() => toast('Copy failed', 'error'));
+}
+function processMonthlySalary() {
+  let activeEmployees = appData.users.filter(u => u.active && u.status === 'active');
+  if (activeEmployees.length === 0) { toast('No active employees', 'error'); return; }
+  let total = 0;
+  activeEmployees.forEach(u => {
+    let sal = u.salary || 0;
+    if (sal > 0) {
+      appData.expenses.push({
+        id: Date.now() + Math.random(),
+        date: today(),
+        category: 'Salary',
+        employeeId: u.id,
+        employeeName: u.name,
+        employeeRole: u.role,
+        amount: sal,
+        description: `Salary: ${u.name} (${u.role})`
+      });
+      total += sal;
+    }
+  });
+  saveData(); renderExpenses(); renderDashboard();
+  toast(`✅ Salary processed: ${formatCurrency(total)} for ${activeEmployees.length} employees`);
+}
+function renderSettings() { document.getElementById('contentArea').innerHTML = `<div class="card"><h3>Settings</h3><div><label>Company Name</label><input id="compName" value="${appData.companyName}"></div><div><label>WhatsApp Number</label><input id="waNum" value="${appData.whatsappNumber}"></div><button class="btn btn-primary" onclick="saveSettings()">Save Settings</button><button class="btn btn-secondary" onclick="openChangePassword()">Change My Password</button></div>`; }
+function saveSettings() { appData.companyName = document.getElementById('compName').value; appData.whatsappNumber = document.getElementById('waNum').value; saveData(); toast('Settings saved'); }
 function openChangePassword() { document.getElementById('changePwdContent').innerHTML = `<div><label>Current Password</label><input type="password" id="oldPwd"></div><div><label>New Password</label><input type="password" id="newPwd"></div><div><label>Confirm</label><input type="password" id="confirmPwd"></div><button class="btn btn-primary" onclick="changePassword()">Change</button>`; document.getElementById('changePasswordModal').classList.add('open'); }
-async function changePassword() { let old=document.getElementById('oldPwd').value, newP=document.getElementById('newPwd').value, con=document.getElementById('confirmPwd').value; if(old!==currentUser.password){ toast('Current password incorrect','error'); return; } if(newP!==con){ toast('Passwords do not match','error'); return; } currentUser.password=newP; await syncToFirebase(`users/${currentUser.id}`, currentUser); closeModal('changePasswordModal'); toast('Password changed!'); renderEmployees(); }
-function printInvoice(iid) { let inv=realtimeInvoices.find(i=>i.id===iid); if(inv){ currentInvoiceForPrint=inv; let html=`<div class="receipt-thermal" id="thermalReceipt"><div style="text-align:center;"><h3>AgriSpray Pro</h3></div><hr><div>${inv.id}</div><div>Farmer: ${inv.farmer}</div><div>Total: ${formatCurrency(inv.total)}</div><hr><div>✅ PAID</div></div>`; document.getElementById('printContent').innerHTML=html; document.getElementById('printModal').classList.add('open'); } }
-async function printInvoicePDF() { const {jsPDF}=window.jspdf; let el=document.getElementById('thermalReceipt'); if(!el)return; let canvas=await html2canvas(el,{scale:2}); let img=canvas.toDataURL('image/png'); let pdf=new jsPDF({unit:'mm',format:'a4'}); let w=190,h=(canvas.height*w)/canvas.width; pdf.addImage(img,'PNG',10,10,w,h); pdf.save(`Invoice_${currentInvoiceForPrint?.id}.pdf`); toast('PDF saved'); }
-function printThermalReceipt() { let c=document.getElementById('thermalReceipt'); if(!c)return; let win=window.open('','_blank','width=380,height=650'); win.document.write(`<html><head><title>Receipt</title><style>body{font-family:monospace;}</style></head><body>${c.outerHTML}<script>window.print();window.close();<\/script></body></html>`); win.document.close(); }
+function changePassword() { let old = document.getElementById('oldPwd').value, newP = document.getElementById('newPwd').value, con = document.getElementById('confirmPwd').value; if (old !== currentUser.password) { toast('Current password incorrect', 'error'); return; } if (newP !== con) { toast('Passwords do not match', 'error'); return; } currentUser.password = newP; let idx = appData.users.findIndex(u => u.id === currentUser.id); if (idx !== -1) appData.users[idx].password = newP; saveData(); closeModal('changePasswordModal'); toast('Password changed successfully!'); }
 
 function showPage(page) {
-  if(page==='dashboard') renderDashboard();
-  else if(page==='bookings') renderBookings();
-  else if(page==='invoices') renderInvoices();
-  else if(page==='expenses') renderExpenses();
-  else if(page==='investments') renderInvestments();
-  else if(page==='drones') renderDrones();
-  else if(page==='employees') renderEmployees();
-  else if(page==='settings') renderSettings();
-  let titles={dashboard:'📊 Dashboard',bookings:'📋 Bookings',invoices:'💰 Invoices',expenses:'📉 Expenses',investments:'📈 Investments',drones:'🚁 Drones',employees:'👥 Employees',settings:'⚙️ Settings'};
-  document.getElementById('pageTitle').innerHTML=titles[page]||page;
-  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  let titles = { dashboard: '📊 Dashboard', bookings: '📋 Bookings', invoices: '💰 Invoices', expenses: '📉 Expenses', investments: '📈 Investments', drones: '🚁 Drones', employees: '👥 Employees', settings: '⚙️ Settings' };
+  document.getElementById('pageTitle').innerHTML = titles[page] || page;
+  if (page === 'dashboard') renderDashboard();
+  else if (page === 'bookings') renderBookings();
+  else if (page === 'invoices') renderInvoices();
+  else if (page === 'expenses') renderExpenses();
+  else if (page === 'investments') renderInvestments();
+  else if (page === 'drones') renderDrones();
+  else if (page === 'employees') renderEmployees();
+  else if (page === 'settings') renderSettings();
 }
 
-// Weather
-async function fetchWeather() { try { let r=await fetch('https://api.open-meteo.com/v1/forecast?latitude=34.1985&longitude=72.0243&current=temperature_2m'); let d=await r.json(); document.getElementById('weatherTemp').innerHTML=Math.round(d.current.temperature_2m); } catch(e){} }
-fetchWeather(); setInterval(fetchWeather,300000);
-function updateDateTime() { let now=new Date(); let td=document.getElementById('sidebarTime'); if(td) td.innerHTML=now.toLocaleDateString()+'<br>'+now.toLocaleTimeString(); }
-setInterval(updateDateTime,1000);
-
-// Initialize
-initFirebase();
-setTimeout(() => { if(!checkSession()){ document.getElementById('loginScreen').style.display='flex'; document.getElementById('mainApp').style.display='none'; } }, 2000);
+loadData();
+if (!checkSession()) { document.getElementById('loginScreen').style.display = 'flex'; document.getElementById('mainApp').style.display = 'none'; }
 </script>
 </body>
 </html>
